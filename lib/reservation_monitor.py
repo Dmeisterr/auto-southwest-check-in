@@ -64,7 +64,6 @@ class ReservationMonitor:
             time.sleep(0.05)
             # Lock so all processes are stopped sequentially
             with self.lock:
-                WebDriver.reset_temp_dir()
                 self._stop_monitoring()
 
     def _monitor(self) -> None:
@@ -158,9 +157,12 @@ class ReservationMonitor:
         """
         current_time = get_current_time()
         time_taken = (current_time - previous_time).total_seconds()
-        sleep_time = self.config.retrieval_interval - time_taken
+        sleep_time = max(self.config.retrieval_interval - time_taken, 0)
         logger.debug("Sleeping for %d seconds", sleep_time)
         time.sleep(sleep_time)
+
+    def get_account_name(self) -> str:
+        return f"{self.first_name} {self.last_name}"
 
     def _stop_checkins(self) -> None:
         """
@@ -248,7 +250,6 @@ class AccountMonitor(ReservationMonitor):
                             err.status_code,
                         )
                         logger.debug("Waiting for %d seconds before retrying", RETRY_WAIT_SECONDS)
-                        webdriver.reset_temp_dir()
                         time.sleep(RETRY_WAIT_SECONDS)
                     else:
                         logger.debug(
@@ -262,6 +263,13 @@ class AccountMonitor(ReservationMonitor):
                     sys.exit(1)
 
         return [], True
+
+    def get_account_name(self) -> str:
+        if not self.first_name:
+            # No name has been set, so use the account's username.
+            return self.username
+
+        return super().get_account_name()
 
     def _stop_monitoring(self) -> None:
         print(f"\nStopping monitoring for account with username {self.username}")

@@ -196,6 +196,23 @@ class TestReservationMonitor:
 
         mock_sleep.assert_called_once_with(12 * 60 * 60)
 
+    def test_smart_sleep_handles_negative_sleep_time(self, mocker: MockerFixture) -> None:
+        mock_sleep = mocker.patch("time.sleep")
+        mocker.patch(
+            "lib.reservation_monitor.get_current_time", return_value=datetime(1999, 12, 30, 12)
+        )
+
+        # Retrieval interval is 1 hour, but the time taken is more than an hour
+        self.monitor.config.retrieval_interval = 60 * 60
+        self.monitor._smart_sleep(datetime(1999, 12, 30, 10))
+
+        mock_sleep.assert_called_once_with(0)
+
+    def test_get_account_name_returns_correct_name(self) -> None:
+        self.monitor.first_name = "John"
+        self.monitor.last_name = "Doe"
+        assert self.monitor.get_account_name() == "John Doe"
+
     def test_stop_checkins_stops_all_checkins(self, mocker: MockerFixture) -> None:
         mock_checkin_handler = mocker.patch.object(CheckInHandler, "stop_check_in")
 
@@ -218,6 +235,7 @@ class TestAccountMonitor:
     @pytest.fixture(autouse=True)
     def _set_up_monitor(self, mock_lock: mock.Mock, mocker: MockerFixture) -> None:
         self.monitor = AccountMonitor(AccountConfig(), mock_lock)
+        self.monitor.username = "test_user"
         mocker.patch(
             "lib.reservation_monitor.get_current_time", return_value=datetime(1999, 12, 31)
         )
@@ -293,6 +311,14 @@ class TestAccountMonitor:
 
         assert new_reservations == reservations
         assert not skip_scheduling
+
+    def test_get_account_name_returns_name_when_set(self) -> None:
+        self.monitor.first_name = "John"
+        self.monitor.last_name = "Doe"
+        assert self.monitor.get_account_name() == "John Doe"
+
+    def test_get_account_name_returns_username_when_name_not_set(self) -> None:
+        assert self.monitor.get_account_name() == self.monitor.username
 
     def test_stop_monitoring_stops_checkins(self, mocker: MockerFixture) -> None:
         mock_stop_checkins = mocker.patch.object(AccountMonitor, "_stop_checkins")
