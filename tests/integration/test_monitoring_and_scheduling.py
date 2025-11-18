@@ -162,12 +162,7 @@ def test_account_schedules_new_flights(requests_mock: RequestMocker, mocker: Moc
         )
     }
 
-    trips_response = {
-        "body": (
-            '{"upcomingTripsPage": [{"tripType": "FLIGHT", "confirmationNumber": "TEST"}, '
-            '{"tripType": "CAR"}]}'
-        )
-    }
+    trips_response = {"body": ('{"data": [{"record_locator": "TEST"}]}')}
 
     login_attempts = 0
 

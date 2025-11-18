@@ -19,10 +19,14 @@ if TYPE_CHECKING:
     from .checkin_scheduler import CheckInScheduler
     from .reservation_monitor import AccountMonitor
 
-BASE_URL = "https://mobile.southwest.com"
+BASE_URL = "https://www.southwest.com"
 CHECKIN_URL = BASE_URL + "/air/check-in"
+ACCOUNT_URL = BASE_URL + "/loyalty/myaccount"
 LOGIN_URL = BASE_URL + "/api/security/v4/security/token"
-TRIPS_URL = BASE_URL + "/api/mobile-misc/v1/mobile-misc/page/upcoming-trips"
+TRIPS_URL = (
+    BASE_URL
+    + "/api/loyalty-management/v2/loyalty-management/accounts/self/future-air-reservations-secure"
+)
 HEADERS_URL = BASE_URL + "/api/mobile-air-booking/v1/mobile-air-booking/feature/shopping-details"
 
 # Southwest's code when logging in with the incorrect information
@@ -103,23 +107,18 @@ class WebDriver:
         driver = self._get_driver()
         driver.add_cdp_listener("Network.responseReceived", self._login_listener)
 
+        logger.debug("Loading Southwest account page (this may take a moment)")
+        driver.get(ACCOUNT_URL)
+        self._take_debug_screenshot(driver, "after_acount_page_load.png")
+
         logger.debug("Logging into account to get a list of reservations and valid headers")
 
         # Log in to retrieve the account's reservations and needed headers for later requests
-        seleniumbase_actions.wait_for_element_not_visible(driver, ".dimmer")
-        self._take_debug_screenshot(driver, "pre_login.png")
-
-        # If a popup came up with an error, click "OK" to remove it.
-        # See https://github.com/jdholtz/auto-southwest-check-in/issues/226
-        driver.click_if_visible(".button-popup.confirm-button")
-
-        driver.click(".login-button--box")
         time.sleep(random_sleep_duration(1, 3))
-        driver.type('input[name="userNameOrAccountNumber"]', account_monitor.username)
-        driver.type('input[name="password"]', f"{account_monitor.password}\n")
+        driver.type('input[id="username"]', account_monitor.username)
+        driver.type('input[id="password"]', f"{account_monitor.password}\n")
 
-        # Wait for the necessary information to be set
-        self._wait_for_attribute(driver, "headers_set")
+        # Wait for the necessary login information to be processed
         self._wait_for_login(driver, account_monitor)
         self._take_debug_screenshot(driver, "post_login.png")
 
@@ -152,12 +151,6 @@ class WebDriver:
         )
         logger.debug("Using browser version: %s", driver.caps["browserVersion"])
 
-        driver.add_cdp_listener("Network.requestWillBeSent", self._headers_listener)
-
-        logger.debug("Loading Southwest check-in page (this may take a moment)")
-        driver.get(CHECKIN_URL)
-        self._take_debug_screenshot(driver, "after_page_load.png")
-
         return driver
 
     def _headers_listener(self, data: JSON) -> None:
@@ -173,13 +166,19 @@ class WebDriver:
     def _login_listener(self, data: JSON) -> None:
         """
         Wait for various responses that are needed once the account is logged in. The request IDs
-        are kept track of to get the response body associated with them later.
+        are kept track of to get the response body associated with them later. This listener also
+        sets the headers for the checkin_scheduler, as those are present in the login request.
         """
         response = data["params"]["response"]
         if response["url"] == LOGIN_URL:
             logger.debug("Login response has been received")
             self.login_request_id = data["params"]["requestId"]
             self.login_status_code = response["status"]
+
+            # Also capture the headers as they are present in the request
+            request = data["params"]["request"]
+            self.checkin_scheduler.headers = self._get_needed_headers(request["headers"])
+            self.headers_set = True
         elif response["url"] == TRIPS_URL:
             logger.debug("Upcoming trips response has been received")
             self.trips_request_id = data["params"]["requestId"]
@@ -230,7 +229,7 @@ class WebDriver:
             # yet there was an error
             return
 
-        login_button = "button#login-btn"
+        login_button = "button#submit"
         try:
             seleniumbase_actions.wait_for_element_not_visible(driver, login_button, timeout=5)
         except Exception:
@@ -244,8 +243,8 @@ class WebDriver:
         """
         self._wait_for_attribute(driver, "trips_request_id")
         trips_response = self._get_response_body(driver, self.trips_request_id)
-        reservations = trips_response["upcomingTripsPage"]
-        return [reservation for reservation in reservations if reservation["tripType"] == "FLIGHT"]
+        reservations = trips_response["data"]
+        return reservations
 
     def _get_response_body(self, driver: Driver, request_id: str) -> JSON:
         response = driver.execute_cdp_cmd("Network.getResponseBody", {"requestId": request_id})

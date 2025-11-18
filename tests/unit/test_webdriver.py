@@ -57,9 +57,7 @@ class TestWebDriver:
         self, mocker: MockerFixture, mock_chrome: mock.Mock, mock_account_monitor: mock.Mock
     ) -> None:
         mocker.patch("time.sleep")
-        mocker.patch("lib.webdriver.seleniumbase_actions.wait_for_element_not_visible")
         mocker.patch.object(WebDriver, "_get_driver", return_value=mock_chrome)
-        mock_wait_for_attribute = mocker.patch.object(self.driver, "_wait_for_attribute")
         mock_wait_for_login = mocker.patch.object(WebDriver, "_wait_for_login")
         mocker.patch.object(self.driver, "_fetch_reservations", return_value=["res1", "res2"])
 
@@ -67,19 +65,18 @@ class TestWebDriver:
 
         assert reservations == ["res1", "res2"]
 
-        mock_wait_for_attribute.assert_called_once()
         mock_wait_for_login.assert_called_once()
         mock_chrome.add_cdp_listener.assert_called_once()
         mock_chrome.quit.assert_called_once()
 
-    def test_get_driver_returns_a_webdriver_with_one_request(self, mock_chrome: mock.Mock) -> None:
+    def test_get_driver_returns_a_webdriver(self, mock_chrome: mock.Mock) -> None:
         driver = self.driver._get_driver()
-        driver.add_cdp_listener.assert_called_once()
-        driver.get.assert_called_once()
 
+        # Since we mock the Driver, it should be a mock instance
+        assert isinstance(driver, mock.Mock)
         assert mock_chrome.call_args.kwargs.get("driver_version") == "mlatest"
 
-    def test_get_driver_keeps_is_correctly_configured_in_docker(
+    def test_get_driver_version_is_correctly_configured_in_docker(
         self, mocker: MockerFixture, mock_chrome: mock.Mock
     ) -> None:
         """The driver version should be kept and the virtual display should be started"""
@@ -90,9 +87,9 @@ class TestWebDriver:
         mock_start_display = mocker.patch.object(self.driver, "_start_display")
 
         driver = self.driver._get_driver()
-        driver.add_cdp_listener.assert_called_once()
-        driver.get.assert_called_once()
 
+        # Since we mock the Driver, it should be a mock instance
+        assert isinstance(driver, mock.Mock)
         assert mock_chrome.call_args.kwargs.get("driver_version") == "keep"
         mock_start_display.assert_called_once()
 
@@ -112,12 +109,23 @@ class TestWebDriver:
         assert not self.driver.headers_set
         assert self.driver.checkin_scheduler.headers == {}
 
-    def test_login_listener_sets_login_information(self) -> None:
-        data = {"params": {"response": {"url": LOGIN_URL, "status": 200}, "requestId": "test_id"}}
+    def test_login_listener_sets_login_information_and_headers(self, mocker: MockerFixture) -> None:
+        mocker.patch.object(self.driver, "_get_needed_headers", return_value={"test": "headers"})
+        data = {
+            "params": {
+                "request": {"url": LOGIN_URL, "headers": {}},
+                "response": {"url": LOGIN_URL, "status": 200},
+                "requestId": "test_id",
+            }
+        }
         self.driver._login_listener(data)
 
         assert self.driver.login_status_code == 200
         assert self.driver.login_request_id == "test_id"
+
+        # Headers should also be set
+        assert self.driver.headers_set
+        assert self.driver.checkin_scheduler.headers == {"test": "headers"}
 
     def test_login_listener_sets_trip_information(self) -> None:
         data = {"params": {"response": {"url": TRIPS_URL}, "requestId": "test_id"}}
@@ -132,6 +140,8 @@ class TestWebDriver:
         assert self.driver.login_status_code is None
         assert self.driver.login_request_id is None
         assert self.driver.trips_request_id is None
+        assert not self.driver.headers_set
+        assert self.driver.checkin_scheduler.headers == {}
 
     def test_wait_for_attribute_waits_for_attribute_to_be_set(
         self, mocker: MockerFixture, mock_chrome: mock.Mock
@@ -214,15 +224,13 @@ class TestWebDriver:
         self.driver._click_login_button(mock_chrome)
         mock_chrome.click.assert_called_once()
 
-    def test_fetch_reservations_fetches_only_flight_reservations(
-        self, mocker: MockerFixture
-    ) -> None:
-        trips_response = {"upcomingTripsPage": [{"tripType": "FLIGHT"}, {"tripType": "CAR"}]}
+    def test_fetch_reservations_fetches_flight_reservations(self, mocker: MockerFixture) -> None:
+        trips_response = {"data": ["flight1", "flight2"]}
 
         mocker.patch.object(WebDriver, "_wait_for_attribute")
         mocker.patch.object(WebDriver, "_get_response_body", return_value=trips_response)
 
-        assert self.driver._fetch_reservations(None) == [{"tripType": "FLIGHT"}]
+        assert self.driver._fetch_reservations(None) == ["flight1", "flight2"]
 
     def test_get_response_body_loads_body_from_response(self, mock_chrome: mock.Mock) -> None:
         mock_chrome.execute_cdp_cmd.return_value = {"body": '{"response": "body"}'}
