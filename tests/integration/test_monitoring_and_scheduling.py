@@ -18,7 +18,7 @@ from lib.reservation_monitor import AccountMonitor, ReservationMonitor
 from lib.utils import BASE_URL
 from lib.webdriver import WebDriver
 
-TEST_RESERVATION_URL = BASE_URL + VIEW_RESERVATION_URL + "TEST"
+TEST_RESERVATION_URL = BASE_URL + VIEW_RESERVATION_URL
 
 ALL_HEADERS = {
     "Host": "test_host",
@@ -56,7 +56,10 @@ EXPECTED_HEADERS = {
 def test_flight_is_scheduled_checks_in_and_departs(
     requests_mock: RequestMocker, mocker: MockerFixture
 ) -> None:
-    tz_data = {"LAX": "America/Los_Angeles"}
+    tz_data = {
+        "LAX": {"name": "Los Angeles International Airport", "timezone": "America/Los_Angeles"},
+        "SYD": {"name": "Sydney Airport", "timezone": "Australia/Sydney"},
+    }
     mocker.patch("pathlib.Path.read_text", return_value=json.dumps(tz_data))
 
     current_utc_time = datetime(2020, 10, 5, 18, 29, tzinfo=timezone.utc)
@@ -88,17 +91,21 @@ def test_flight_is_scheduled_checks_in_and_departs(
     mocker.patch.object(WebDriver, "_get_driver", mock_get_driver)
 
     reservation1 = {
-        "viewReservationViewPage": {
+        "data": {
             "bounds": [
                 {
-                    "arrivalAirport": {"name": "test_inbound", "country": None},
-                    "departureAirport": {"code": "LAX", "name": "test_outbound"},
-                    "departureDate": "2020-10-13",
-                    "departureTime": "14:40",
-                    "flights": [{"number": "WN100"}, {"number": "WN101"}],
+                    "international": True,
+                    "segments": [
+                        {
+                            "origination_airport_code": "LAX",
+                            "destination_airport_code": "SYD",
+                            "depart_at": "2020-10-13T14:40:00.000-08:00",
+                            "flight_number": "1000",
+                        }
+                    ],
                 },
             ],
-            "_links": {"reaccom": None},
+            "permissions": {"can_reaccom": False},
         }
     }
 
@@ -141,7 +148,10 @@ def test_account_schedules_new_flights(requests_mock: RequestMocker, mocker: Moc
     config = GlobalConfig()
     config.create_account_config([{"username": "test_user", "password": "test_pass"}])
 
-    tz_data = {"LAX": "America/Los_Angeles", "SYD": "Australia/Sydney"}
+    tz_data = {
+        "LAX": {"name": "Los Angeles International Airport", "timezone": "America/Los_Angeles"},
+        "SYD": {"name": "Sydney Airport", "timezone": "Australia/Sydney"},
+    }
     mocker.patch("pathlib.Path.read_text", return_value=json.dumps(tz_data))
 
     current_utc_time = datetime(2020, 10, 10, tzinfo=timezone.utc)
@@ -193,24 +203,32 @@ def test_account_schedules_new_flights(requests_mock: RequestMocker, mocker: Moc
     mocker.patch.object(WebDriver, "_get_driver", mock_get_driver)
 
     reservation = {
-        "viewReservationViewPage": {
+        "data": {
             "bounds": [
                 {
-                    "arrivalAirport": {"name": "test_inbound", "country": None},
-                    "departureAirport": {"code": "LAX", "name": "test_outbound"},
-                    "departureDate": "2020-10-13",
-                    "departureTime": "14:40",
-                    "flights": [{"number": "WN100"}],
+                    "international": False,
+                    "segments": [
+                        {
+                            "origination_airport_code": "LAX",
+                            "destination_airport_code": "SYD",
+                            "depart_at": "2020-10-13T14:40:00.000-08:00",
+                            "flight_number": "1000",
+                        }
+                    ],
                 },
                 {
-                    "arrivalAirport": {"name": "test_outbound", "country": None},
-                    "departureAirport": {"code": "SYD", "name": "test_inbound"},
-                    "departureDate": "2020-10-16",
-                    "departureTime": "07:20",
-                    "flights": [{"number": "WN101"}],
+                    "international": False,
+                    "segments": [
+                        {
+                            "origination_airport_code": "SYD",
+                            "destination_airport_code": "LAX",
+                            "depart_at": "2020-10-16T07:20:00.000+11:00",
+                            "flight_number": "1000",
+                        }
+                    ],
                 },
             ],
-            "_links": {"reaccom": None},
+            "permissions": {"can_reaccom": False},
         }
     }
 

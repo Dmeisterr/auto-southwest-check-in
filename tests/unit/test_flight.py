@@ -1,112 +1,75 @@
+import copy
+import json
 import zoneinfo
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
-from unittest import mock
 
 import pytest
 from pytest_mock import MockerFixture
 
 from lib.flight import Flight
 
+TEST_AIRPORT_INFO = {
+    "AMD": {"timezone": "Asia/Kolkata", "name": "Ahmedabad"},
+    "IBZ": {"timezone": "Europe/Madrid", "name": "Ibiza"},
+}
+
+TEST_FLIGHT_INFO = {
+    "international": True,
+    "segments": [
+        {
+            "origination_airport_code": "AMD",
+            "destination_airport_code": "IBZ",
+            "depart_at": "1999-12-31T23:59:00.000+05:30",
+            "flight_number": "1000",
+        }
+    ],
+}
+
+
+@pytest.fixture(autouse=True)
+def _set_airport_info_mock(mocker: MockerFixture) -> None:
+    mocker.patch("pathlib.Path.read_text", return_value=json.dumps(TEST_AIRPORT_INFO))
+
 
 class TestFlight:
     @pytest.fixture(autouse=True)
     def _set_up_flight(self) -> None:
-        flight_info = {
-            "departureAirport": {"name": None, "code": "DAL"},
-            "arrivalAirport": {"name": None, "country": None},
-            "departureDate": "1971-06-18",
-            "departureTime": "07:00",
-            "flights": [{"number": "WN100"}],
-        }
+        # Reservation info can be left empty as it is only used for caching, but isn't relevant to
+        # the functionality of the flight class
+        self.flight = Flight(TEST_FLIGHT_INFO, {}, "test_num")
 
-        # Needs to be mocked so it is only run when Flight is instantiated
-        with mock.patch.object(Flight, "_set_flight_time"):
-            # Reservation info can be left empty as it is only used for caching, but isn't relevant
-            # to the functionality of the flight class
-            self.flight = Flight(flight_info, {}, "test_num")
-
-            # Flight times that would be set if _set_flight_time isn't mocked
-            self.flight.departure_time = datetime(1971, 6, 18, 12)
-            self.flight._local_departure_time = datetime(1971, 6, 18, 7)
-
-    @pytest.mark.parametrize(("country", "is_international"), [(None, False), ("Mexico", True)])
-    def test_flight_is_international_when_country_is_specified(
-        self, mocker: MockerFixture, country: str, is_international: bool
-    ) -> None:
-        mocker.patch.object(Flight, "_set_flight_time")
-        flight_info = {
-            "departureAirport": {"name": None},
-            "arrivalAirport": {"name": None, "country": country},
-            "departureTime": None,
-            "flights": [{"number": "WN100"}],
-        }
-        flight = Flight(flight_info, {}, "")
-
-        assert flight.is_international == is_international
-
-    def test_flights_with_the_same_flight_numbers_and_departure_times_are_equal(
-        self, mocker: MockerFixture
-    ) -> None:
-        mocker.patch.object(Flight, "_set_flight_time")
-        flight_info = {
-            "departureAirport": {"name": None},
-            "arrivalAirport": {"name": None, "country": None},
-            "departureTime": None,
-            "flights": [{"number": "WN100"}],
-        }
-        flight1 = Flight(flight_info, {}, "")
-        flight2 = Flight(flight_info, {}, "")
-
-        flight1.departure_time = datetime(1999, 1, 1, 8, 59)
-        flight2.departure_time = datetime(1999, 1, 1, 8, 59)
-
+    def test_flights_with_the_same_flight_numbers_and_departure_times_are_equal(self) -> None:
+        flight1 = Flight(TEST_FLIGHT_INFO, {}, "")
+        flight2 = Flight(TEST_FLIGHT_INFO, {}, "")
         assert flight1 == flight2
 
     @pytest.mark.parametrize(
-        ("flight_info", "departure_time"),
+        ("flight_num", "departure_time"),
         [
-            (
-                {  # Test different flight numbers
-                    "departureAirport": {"name": None},
-                    "arrivalAirport": {"name": None, "country": None},
-                    "departureTime": None,
-                    "flights": [{"number": "WN101"}],
-                },
-                datetime(1999, 1, 1, 8, 59),
-            ),
-            (
-                {  # Test different departure times
-                    "departureAirport": {"name": None},
-                    "arrivalAirport": {"name": None, "country": None},
-                    "departureTime": None,
-                    "flights": [{"number": "WN100"}],
-                },
-                datetime(1999, 1, 1, 9, 59),
-            ),
+            # Test different flight numbers
+            ("2000", "1999-12-31T23:59:00.000+05:30"),
+            # Test different departure times
+            ("1000", "1999-12-31T16:59:00.000+05:30"),
         ],
     )
     def test_flights_with_different_flight_numbers_or_departure_times_are_not_equal(
-        self, mocker: MockerFixture, flight_info: dict[str, Any], departure_time: datetime
+        self, flight_num: str, departure_time: str
     ) -> None:
-        mocker.patch.object(Flight, "_set_flight_time")
-        new_flight = Flight(flight_info, {}, "")
-        new_flight.departure_time = departure_time
+        flight_info = copy.deepcopy(TEST_FLIGHT_INFO)
+        flight_info["segments"][0]["flight_number"] = flight_num
+        flight_info["segments"][0]["depart_at"] = departure_time
 
+        new_flight = Flight(flight_info, {}, "")
         assert self.flight != new_flight
 
     @pytest.mark.parametrize(
-        ("reaccom_url", "expected_val"),
-        [(None, False), ({"href": "/test"}, True)],
+        "can_reaccom",
+        [True, False],
     )
-    def test_flight_can_be_reaccomodated(
-        self, mocker: MockerFixture, reaccom_url: str, expected_val: bool
-    ) -> None:
-        mocker.patch.object(Flight, "_set_flight_time")
-        self.flight.reservation_info = {"_links": {"reaccom": reaccom_url}}
-
-        assert self.flight.can_be_reaccommodated == expected_val
+    def test_flight_can_be_reaccomodated(self, can_reaccom: bool) -> None:
+        self.flight.reservation_info = {"permissions": {"can_reaccom": can_reaccom}}
+        assert self.flight.can_be_reaccommodated == can_reaccom
 
     @pytest.mark.parametrize(
         ("twenty_four_hr", "expected_time"), [(True, "13:59"), (False, "1:59 PM")]
@@ -114,46 +77,28 @@ class TestFlight:
     def test_get_display_time_formats_time_correctly(
         self, twenty_four_hr: bool, expected_time: str
     ) -> None:
-        tz = zoneinfo.ZoneInfo("Asia/Calcutta")
+        tz = zoneinfo.ZoneInfo("Asia/Kolkata")
         self.flight._local_departure_time = datetime(1999, 12, 31, 13, 59, tzinfo=tz)
         assert self.flight.get_display_time(twenty_four_hr) == f"1999-12-31 {expected_time} IST"
 
-    def test_set_flight_time_sets_the_correct_time(self, mocker: MockerFixture) -> None:
-        mock_get_airport_tz = mocker.patch.object(
-            Flight, "_get_airport_timezone", return_value="Asia/Calcutta"
-        )
-        mock_convert_to_utc = mocker.patch.object(Flight, "_convert_to_utc", return_value="18:29")
+    def test_set_flight_info_sets_all_the_correct_info(self) -> None:
+        flight = Flight(TEST_FLIGHT_INFO, {}, "test_num")
 
-        flight_info = {
-            "departureDate": "12-31-99",
-            "departureTime": "23:59",
-            "departureAirport": {"code": "999"},
-        }
-        self.flight._set_flight_time(flight_info)
+        assert flight.departure_airport == "Ahmedabad"
+        assert flight.destination_airport == "Ibiza"
+        assert flight.departure_time == datetime(1999, 12, 31, 18, 29, tzinfo=timezone.utc)
+        assert flight.flight_number == "1000"
 
-        mock_get_airport_tz.assert_called_once_with("999")
-        mock_convert_to_utc.assert_called_once_with("12-31-99 23:59", "Asia/Calcutta")
-        assert self.flight.departure_time == "18:29"
-
-    def test_get_airport_timezone_returns_the_correct_timezone(self, mocker: MockerFixture) -> None:
-        mocker.patch.object(Path, "read_text")
-        mocker.patch("json.loads", return_value={"test_code": "Asia/Calcutta"})
-        tz = self.flight._get_airport_timezone("test_code")
-        assert tz == zoneinfo.ZoneInfo("Asia/Calcutta")
+    def test_get_airport_info_returns_all_airport_info(self, mocker: MockerFixture) -> None:
+        expected_airport_info = {"test_code": {"timezone": "Asia/Kolkata", "name": "Test Airport"}}
+        mocker.patch.object(Path, "read_text", return_value=json.dumps(expected_airport_info))
+        airport_info = self.flight._get_airport_info()
+        assert airport_info == expected_airport_info
 
     def test_convert_to_utc_converts_local_time_to_utc(self) -> None:
-        tz = zoneinfo.ZoneInfo("Asia/Calcutta")
-        utc_flight_time = self.flight._convert_to_utc("1999-12-31 23:59", tz)
+        tz_str = "Asia/Kolkata"
+        tz = zoneinfo.ZoneInfo(tz_str)
+        utc_flight_time = self.flight._convert_to_utc("1999-12-31T23:59:00.000+05:30", tz_str)
 
         assert utc_flight_time == datetime(1999, 12, 31, 18, 29, tzinfo=timezone.utc)
         assert self.flight._local_departure_time == datetime(1999, 12, 31, 23, 59, tzinfo=tz)
-
-    @pytest.mark.parametrize(
-        ("numbers", "expected_num"),
-        [(["WN100"], "100"), (["WN100", "WN101"], "100\u200b/\u200b101")],
-    )
-    def test_get_flight_number_creates_flight_number_correctly(
-        self, numbers: list[str], expected_num: str
-    ) -> None:
-        flights = [{"number": num} for num in numbers]
-        assert self.flight._get_flight_number(flights) == expected_num

@@ -1,3 +1,4 @@
+import json
 from typing import Any, Callable
 
 import pytest
@@ -21,15 +22,25 @@ def mock_sleep(mocker: MockerFixture) -> None:
 
 @pytest.fixture
 def test_flight(mocker: MockerFixture) -> Flight:
-    mocker.patch.object(Flight, "_set_flight_time")
+    airport_info = {
+        "AMD": {"timezone": "Asia/Kolkata", "name": "Ahmedabad"},
+        "IBZ": {"timezone": "Europe/Madrid", "name": "Ibiza"},
+    }
+    mocker.patch("pathlib.Path.read_text", return_value=json.dumps(airport_info))
+
     flight_info = {
-        "departureAirport": {"name": None},
-        "arrivalAirport": {"name": None, "country": None},
-        "departureTime": None,
-        "flights": [{"number": "WN100"}],
+        "international": True,
+        "segments": [
+            {
+                "origination_airport_code": "AMD",
+                "destination_airport_code": "IBZ",
+                "depart_at": "1999-12-31T23:59:00.000+05:30",
+                "flight_number": "1000",
+            }
+        ],
     }
 
-    reservation_info = {"bounds": [flight_info]}
+    reservation_info = {"bounds": [flight_info], "permissions": {"can_reaccom": False}}
     return Flight(flight_info, reservation_info, "")
 
 
@@ -65,8 +76,8 @@ class TestFareChecker:
         self, mocker: MockerFixture, test_flight: Flight
     ) -> None:
         flights = [
-            {"flightNumbers": "99"},
-            {"flightNumbers": "100", "fares": ["fare_one", "fare_two"]},
+            {"flightNumbers": "999"},
+            {"flightNumbers": "1000", "fares": ["fare_one", "fare_two"]},
         ]
         mocker.patch.object(
             FareChecker, "_get_matching_flights", return_value=(flights, "test_fare")
@@ -183,7 +194,7 @@ class TestFareChecker:
             "originalDate": "1/1",
             "toAirportCode": "LAX",
             "fromAirportCode": "MIA",
-            "flight": "100",
+            "flight": "1000",
         }
         flight_page = {
             "boundSelections": [bound_one],
@@ -208,13 +219,13 @@ class TestFareChecker:
             "originalDate": "1/1",
             "toAirportCode": "LAX",
             "fromAirportCode": "MIA",
-            "flight": "99",
+            "flight": "999",
         }
         bound_two = {
             "originalDate": "1/2",
             "toAirportCode": "MIA",
             "fromAirportCode": "LAX",
-            "flight": "100",
+            "flight": "1000",
         }
         flight_page = {
             "boundSelections": [bound_one, bound_two],
@@ -290,8 +301,8 @@ class TestFareChecker:
         self.checker.filter = fare_checker.same_flight_filter
 
         flights = [
-            {"fares": "fare1", "flightNumbers": "100"},
-            {"fares": "fare2", "flightNumbers": "101"},
+            {"fares": "fare1", "flightNumbers": "1000"},
+            {"fares": "fare2", "flightNumbers": "1001"},
         ]
 
         fares = [{"amount": 3000, "currencyCode": "PTS"}, {"amount": -2000, "currencyCode": "PTS"}]
@@ -354,14 +365,15 @@ def test_get_fare_check_filter_raises_exception_when_option_does_not_match() -> 
 
 
 @pytest.mark.parametrize(
-    ("flight", "filter_out"), [({"flightNumbers": "100"}, True), ({"flightNumbers": "101"}, False)]
+    ("flight", "filter_out"),
+    [({"flightNumbers": "1000"}, True), ({"flightNumbers": "1001"}, False)],
 )
 def test_same_flight_filter(flight: JSON, filter_out: bool, test_flight: Flight) -> None:
     assert fare_checker.same_flight_filter(test_flight, flight) == filter_out
 
 
 def test_any_flight_filter(test_flight: Flight) -> None:
-    assert fare_checker.any_flight_filter(test_flight, {"flightNumbers": "101"})
+    assert fare_checker.any_flight_filter(test_flight, {"flightNumbers": "1001"})
 
 
 @pytest.mark.parametrize(

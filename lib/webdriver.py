@@ -118,8 +118,9 @@ class WebDriver:
         driver.type('input[id="username"]', account_monitor.username)
         driver.type('input[id="password"]', f"{account_monitor.password}\n")
 
-        # Wait for the necessary login information to be processed
+        # Wait for the necessary information to be set
         self._wait_for_login(driver, account_monitor)
+        self._wait_for_attribute(driver, "headers_set")
         self._take_debug_screenshot(driver, "post_login.png")
 
         # The upcoming trips page is also loaded when we log in, so we might as well grab it
@@ -151,34 +152,30 @@ class WebDriver:
         )
         logger.debug("Using browser version: %s", driver.caps["browserVersion"])
 
+        driver.add_cdp_listener("Network.requestWillBeSent", self._headers_listener)
+
         return driver
 
     def _headers_listener(self, data: JSON) -> None:
         """
-        Wait for the correct URL request has gone through. Once it has, set the headers
+        Wait until the correct URL request has gone through. Once it has, set the headers
         in the checkin_scheduler.
         """
         request = data["params"]["request"]
-        if request["url"] == HEADERS_URL:
+        if request["url"] == HEADERS_URL or request["url"] == LOGIN_URL:
             self.checkin_scheduler.headers = self._get_needed_headers(request["headers"])
             self.headers_set = True
 
     def _login_listener(self, data: JSON) -> None:
         """
         Wait for various responses that are needed once the account is logged in. The request IDs
-        are kept track of to get the response body associated with them later. This listener also
-        sets the headers for the checkin_scheduler, as those are present in the login request.
+        are kept track of to get the response body associated with them later.
         """
         response = data["params"]["response"]
         if response["url"] == LOGIN_URL:
             logger.debug("Login response has been received")
             self.login_request_id = data["params"]["requestId"]
             self.login_status_code = response["status"]
-
-            # Also capture the headers as they are present in the request
-            request = data["params"]["request"]
-            self.checkin_scheduler.headers = self._get_needed_headers(request["headers"])
-            self.headers_set = True
         elif response["url"] == TRIPS_URL:
             logger.debug("Upcoming trips response has been received")
             self.trips_request_id = data["params"]["requestId"]

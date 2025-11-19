@@ -3,6 +3,7 @@ Runs the fare checker through various scenarios that could happen while checking
 """
 
 import copy
+import json
 from unittest import mock
 
 import pytest
@@ -31,7 +32,7 @@ CHANGE_FLIGHT_PAGE = {
                 "originalDate": "2021-12-06",
                 "toAirportCode": "SYD",
                 "fromAirportCode": "LAX",
-                "flight": "100\u200b/\u200b101",
+                "flight": "1000",
             }
         ],
     }
@@ -50,7 +51,7 @@ FLIGHT_CARDS = [
         "stopDescription": "Nonstop",
     },
     {
-        "flightNumbers": "98\u200b/\u200b99",
+        "flightNumbers": "99",
         "fares": [
             {
                 "_meta": {"fareProductId": "WGA"},
@@ -60,7 +61,7 @@ FLIGHT_CARDS = [
         "stopDescription": "1 Stop, LAX",
     },
     {
-        "flightNumbers": "100\u200b/\u200b101",
+        "flightNumbers": "1000",
         "fares": [
             {"_meta": {"fareProductId": "TEST"}},
             {
@@ -102,13 +103,25 @@ def monitor() -> ReservationMonitor:
 
 
 @pytest.fixture
-def flight() -> Flight:
+def flight(mocker: MockerFixture) -> Flight:
+    airport_info = {
+        "AMD": {"timezone": "Asia/Kolkata", "name": "Ahmedabad"},
+        "IBZ": {"timezone": "Europe/Madrid", "name": "Ibiza"},
+    }
+    mocker.patch("pathlib.Path.read_text", return_value=json.dumps(airport_info))
+
     flight_info = {
-        "arrivalAirport": {"name": "test_inbound", "country": None},
-        "departureAirport": {"code": "LAX", "name": "test_outbound"},
-        "departureDate": "2021-12-06",
-        "departureTime": "14:40",
-        "flights": [{"number": "WN100"}, {"number": "WN101"}],
+        "international": True,
+        "segments": [
+            {
+                "origination_airport_code": "AMD",
+                "destination_airport_code": "IBZ",
+                "depart_at": "1999-12-31T23:59:00.000+05:30",
+                "flight_number": "1000",
+            }
+        ],
+        # TODO: Not an actual key returned by Southwest, just here during the migration to the web
+        # API
         "fareProductDetails": {"fareProductId": "WGA"},
     }
 

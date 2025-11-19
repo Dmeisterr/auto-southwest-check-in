@@ -18,16 +18,27 @@ from lib.webdriver import WebDriver
 
 @pytest.fixture
 def test_flights(mocker: MockerFixture) -> list[Flight]:
-    mocker.patch.object(Flight, "_set_flight_time")
-    flight_info = {
-        "departureAirport": {"name": None},
-        "arrivalAirport": {"name": None, "country": None},
-        "departureTime": None,
-        "flights": [{"number": "100"}],
+    airport_info = {
+        "AMD": {"timezone": "Asia/Kolkata", "name": "Ahmedabad"},
+        "IBZ": {"timezone": "Europe/Madrid", "name": "Ibiza"},
     }
-    reservation_info = {"bounds": [flight_info], "_links": {"reaccom": None}}
+    mocker.patch("pathlib.Path.read_text", return_value=json.dumps(airport_info))
 
-    flight1 = Flight(flight_info, reservation_info, "")
+    flight_info = {
+        "international": True,
+        "segments": [
+            {
+                "origination_airport_code": "AMD",
+                "destination_airport_code": "IBZ",
+                "depart_at": "1999-12-31T23:59:00.000+05:30",
+                "flight_number": "1000",
+            }
+        ],
+    }
+
+    reservation_info = {"bounds": [flight_info], "permissions": {"can_reaccom": False}}
+
+    flight1 = Flight(reservation_info["bounds"][0], reservation_info, "")
     # With this deepcopy, any modifications to either flight should not affect the other
     flight2 = copy.deepcopy(flight1)
     return [flight1, flight2]
@@ -105,7 +116,7 @@ class TestCheckInScheduler:
         assert len(flights) == 0, "Departed flights were retrieved"
 
     def test_get_reservation_info_returns_reservation_info(self, mocker: MockerFixture) -> None:
-        reservation_content = {"viewReservationViewPage": {"bounds": [{"test": "reservation"}]}}
+        reservation_content = {"data": {"bounds": [{"test": "reservation"}]}}
         mocker.patch("lib.checkin_scheduler.make_request", return_value=reservation_content)
 
         reservation_info = self.scheduler._get_reservation_info("flight1")
@@ -216,7 +227,7 @@ class TestCheckInScheduler:
         )
 
         # Modify the reservation info so one flight can be seen as reacommodated
-        test_flights[1].reservation_info["_links"]["reaccom"] = {"href": "/test"}
+        test_flights[1].reservation_info["permissions"]["can_reaccom"] = True
 
         self.scheduler._schedule_flights(test_flights)
 

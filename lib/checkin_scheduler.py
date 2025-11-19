@@ -12,7 +12,7 @@ from .webdriver import WebDriver
 if TYPE_CHECKING:
     from .reservation_monitor import ReservationMonitor
 
-VIEW_RESERVATION_URL = "mobile-air-booking/v1/mobile-air-booking/page/view-reservation/"
+VIEW_RESERVATION_URL = "air-manage-reservation/v1/air-manage-reservation/reservations"
 logger = get_logger(__name__)
 
 
@@ -69,15 +69,14 @@ class CheckInScheduler:
 
     def _get_reservation_info(self, confirmation_number: str) -> dict[str, Any]:
         info = {
-            "firstName": self.reservation_monitor.first_name,
-            "lastName": self.reservation_monitor.last_name,
-            "recordLocator": confirmation_number,
+            "first_name": self.reservation_monitor.first_name,
+            "last_name": self.reservation_monitor.last_name,
+            "record_locator": confirmation_number,
         }
-        site = VIEW_RESERVATION_URL + confirmation_number
 
         try:
             logger.debug("Retrieving reservation information")
-            response = make_request("POST", site, self.headers, info)
+            response = make_request("POST", VIEW_RESERVATION_URL, self.headers, info)
         except RequestError as err:
             # Don't send a notification if flights have already been scheduled and all flights
             # from this reservation are old. This is how old flights are removed.
@@ -90,7 +89,7 @@ class CheckInScheduler:
             return {}
 
         logger.debug("Successfully retrieved reservation information")
-        return response["viewReservationViewPage"]
+        return response["data"]
 
     def _set_same_day_flight(self, flight: Flight, previous_flights: list[Flight]) -> None:
         for prev_flight in previous_flights:

@@ -1,6 +1,7 @@
 """Runs a mock check-in for the CheckInHandler as well as a same-day flight check-in"""
 
 import copy
+import json
 from datetime import datetime
 from multiprocessing import Lock
 from unittest.mock import call
@@ -17,13 +18,25 @@ from lib.utils import BASE_URL
 @pytest.fixture
 def handler(mocker: MockerFixture) -> None:
     mock_scheduler = mocker.patch("lib.checkin_scheduler.CheckInScheduler")
-    flight_info = {
-        "arrivalAirport": {"name": "test_inbound", "country": None},
-        "departureAirport": {"code": "LAX", "name": "test_outbound"},
-        "departureDate": "2021-12-06",
-        "departureTime": "14:40",
-        "flights": [{"number": "WN100"}],
+
+    airport_info = {
+        "AMD": {"timezone": "Asia/Kolkata", "name": "Ahmedabad"},
+        "IBZ": {"timezone": "Europe/Madrid", "name": "Ibiza"},
     }
+    mocker.patch("pathlib.Path.read_text", return_value=json.dumps(airport_info))
+
+    flight_info = {
+        "international": True,
+        "segments": [
+            {
+                "origination_airport_code": "AMD",
+                "destination_airport_code": "IBZ",
+                "depart_at": "2021-12-06T07:40:00.000-07:00",
+                "flight_number": "1000",
+            }
+        ],
+    }
+
     flight = Flight(flight_info, {}, "TEST")
     # Make sure it isn't affected by local time
     flight.departure_time = datetime(2021, 12, 6, 14, 40)

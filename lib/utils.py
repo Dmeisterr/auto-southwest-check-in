@@ -16,7 +16,7 @@ from .log import get_logger
 # Type alias for JSON
 JSON = dict[str, Any]
 
-BASE_URL = "https://mobile.southwest.com/api/"
+BASE_URL = "https://www.southwest.com/api/"
 NTP_SERVER = "time.nist.gov"
 NTP_BACKUP_SERVER = "time.cloudflare.com"
 
