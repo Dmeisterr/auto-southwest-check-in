@@ -1,6 +1,7 @@
 [tool.codespell]
 ignore-words-list="checkin,ist"
-skip = "venv,utils/airport_info.json"
+# We add both because pre-commit doesn't skip the file when it is prefixed with ./, but the CI does
+skip = "venv,./utils/airport_info.json,utils/airport_info.json"
 
 [tool.coverage.run]
 branch = true

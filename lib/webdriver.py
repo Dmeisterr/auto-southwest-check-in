@@ -20,14 +20,20 @@ if TYPE_CHECKING:
     from .reservation_monitor import AccountMonitor
 
 BASE_URL = "https://www.southwest.com"
-CHECKIN_URL = BASE_URL + "/air/check-in"
+# Loaded when we start the driver
 ACCOUNT_URL = BASE_URL + "/loyalty/myaccount"
+# Used to log in as well as get valid headers
 LOGIN_URL = BASE_URL + "/api/security/v4/security/token"
+# Used to get the list of upcoming trips for an account
 TRIPS_URL = (
     BASE_URL
     + "/api/loyalty-management/v2/loyalty-management/accounts/self/future-air-reservations-secure"
 )
-HEADERS_URL = BASE_URL + "/api/mobile-air-booking/v1/mobile-air-booking/feature/shopping-details"
+# Used to get valid headers
+HEADERS_URL = (
+    BASE_URL
+    + "/api/loyalty-management/v2/loyalty-management/accounts/self/future-car-reservations-secure"
+)
 
 # Southwest's code when logging in with the incorrect information
 INVALID_CREDENTIALS_CODE = 400518024
@@ -107,13 +113,8 @@ class WebDriver:
         driver = self._get_driver()
         driver.add_cdp_listener("Network.responseReceived", self._login_listener)
 
-        logger.debug("Loading Southwest account page (this may take a moment)")
-        driver.get(ACCOUNT_URL)
-        self._take_debug_screenshot(driver, "after_acount_page_load.png")
-
-        logger.debug("Logging into account to get a list of reservations and valid headers")
-
         # Log in to retrieve the account's reservations and needed headers for later requests
+        logger.debug("Logging into account to get a list of reservations and valid headers")
         time.sleep(random_sleep_duration(1, 3))
         driver.type('input[id="username"]', account_monitor.username)
         driver.type('input[id="password"]', f"{account_monitor.password}\n")
@@ -153,6 +154,10 @@ class WebDriver:
         logger.debug("Using browser version: %s", driver.caps["browserVersion"])
 
         driver.add_cdp_listener("Network.requestWillBeSent", self._headers_listener)
+
+        logger.debug("Loading Southwest account page (this may take a moment)")
+        driver.get(ACCOUNT_URL)
+        self._take_debug_screenshot(driver, "after_page_load.png")
 
         return driver
 

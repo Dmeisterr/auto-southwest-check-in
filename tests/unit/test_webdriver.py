@@ -71,9 +71,12 @@ class TestWebDriver:
         mock_chrome.add_cdp_listener.assert_called_once()
         mock_chrome.quit.assert_called_once()
 
-    def test_get_driver_returns_a_webdriver_with_a_listener(self, mock_chrome: mock.Mock) -> None:
+    def test_get_driver_returns_a_webdriver_with_a_listener_and_request(
+        self, mock_chrome: mock.Mock
+    ) -> None:
         driver = self.driver._get_driver()
         driver.add_cdp_listener.assert_called_once()
+        driver.get.assert_called_once()
 
         assert mock_chrome.call_args.kwargs.get("driver_version") == "mlatest"
 
