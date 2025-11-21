@@ -83,7 +83,7 @@ def test_check_in(
     }
 
     requests_mock.post(
-        BASE_URL + CHECKIN_URL + "TEST",
+        BASE_URL + CHECKIN_URL,
         [{"json": post_response1, "status_code": 200}],
     )
     requests_mock.post(

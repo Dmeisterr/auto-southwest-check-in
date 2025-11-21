@@ -23,8 +23,7 @@ if TYPE_CHECKING:
 # Type alias for JSON
 JSON = dict[str, Any]
 
-CHECKIN_URL = "mobile-air-operations/v1/mobile-air-operations/page/check-in/"
-MANUAL_CHECKIN_URL = "https://mobile.southwest.com/check-in"
+CHECKIN_URL = "air-checkin/v1/air-checkin/page/air/check-in/review"
 
 # Should only be relevant for same day flights
 MAX_CHECK_IN_ATTEMPTS = 10
@@ -203,16 +202,15 @@ class CheckInHandler:
         """
         headers = self.checkin_scheduler.headers
         info = {
-            "firstName": self.first_name,
-            "lastName": self.last_name,
-            "passengerSearchToken": "",
-            "recordLocator": self.flight.confirmation_number,
+            "confirmationNumber": self.flight.confirmation_number,
+            "passengerFirstName": self.first_name,
+            "passengerLastName": self.last_name,
+            "application": "air-check-in",
+            "site": "southwest",
         }
-        site = CHECKIN_URL + self.flight.confirmation_number
-
         logger.debug("Making first POST request to check in")
         # Don't randomly sleep during the check-in requests to have them go through more quickly
-        response = make_request("POST", site, headers, info, random_sleep=False)
+        response = make_request("POST", CHECKIN_URL, headers, info, random_sleep=False)
 
         info = response["checkInViewReservationPage"]["_links"]["checkIn"]
         site = f"mobile-air-operations{info['href']}"
