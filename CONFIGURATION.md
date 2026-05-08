@@ -15,7 +15,7 @@ reservation-specific configurations).
 - [Browser Path](#browser-path)
 - [Retrieval Interval](#retrieval-interval)
 - [Config UI](#config-ui)
-- [GitHub Actions Fare Tracking](#github-actions-fare-tracking)
+- [Raspberry Pi systemd Fare Tracking](#raspberry-pi-systemd-fare-tracking)
 - [Accounts and Reservations](#accounts-and-reservations)
     * [Accounts](#accounts)
     * [Reservations](#reservations)
@@ -67,6 +67,15 @@ for each notification service you use.
   ]
 }
 ```
+
+For Gmail, use a Google app password instead of your normal Google password. The easiest local setup is to put
+the Apprise email URL in an environment file instead of committing it to `config.json`:
+```shell
+AUTO_SOUTHWEST_CHECK_IN_NOTIFICATION_URL="mailtos://gmail.com?user=your.email@gmail.com&pass=your-app-password"
+```
+
+If you want to send to a different recipient, append `&to=recipient@example.com`. If your app password contains
+spaces, remove the spaces.
 
 ### Notification Level
 Default: 2 \
@@ -134,14 +143,26 @@ The default URL is `http://127.0.0.1:8765`. To use a different port:
 $ python3 southwest.py --config-ui --config-ui-port 9090
 ```
 
-## GitHub Actions Fare Tracking
-The repository includes a scheduled GitHub Actions workflow that checks standalone fare trackers every 8 hours.
-It restores `logs/fare-tracker-state.json`, runs the trackers once, creates one GitHub issue if any cash or
-points prices drop, and saves the updated state for the next run. GitHub will email users who are watching
-the repository, so no email username or password is needed.
+## Raspberry Pi systemd Fare Tracking
+For standalone fare tracking on a Raspberry Pi, use the included `systemd` timer. It runs the trackers once every
+8 hours, then exits. State is kept in `logs/fare-tracker-state.json`, so the next run can compare against the
+previous observed cash and points prices.
 
-Create a repository secret named `AUTO_SOUTHWEST_CHECK_IN_CONFIG_JSON` containing your full `config.json` content.
-Set `retrieval_interval` to `0`:
+Install the project under your Pi user's home directory. The unit templates use `~/auto-southwest-check-in`;
+if you clone somewhere else, edit the `WorkingDirectory` and `ExecStart` paths in the service file before installing it.
+```shell
+$ sudo apt update
+$ sudo apt install -y python3-venv chromium-browser
+$ git clone https://github.com/jdholtz/auto-southwest-check-in.git ~/auto-southwest-check-in
+$ cd ~/auto-southwest-check-in
+$ python3 -m venv venv
+$ venv/bin/pip install -r requirements.txt
+```
+
+On some Raspberry Pi OS releases, the browser package is named `chromium` instead of `chromium-browser`.
+
+Create `config.json` with `retrieval_interval` set to `0`. The timer controls the 8-hour schedule, so the script
+should not run its own loop:
 ```json
 {
     "$schema": "config.schema.json",
@@ -160,9 +181,48 @@ Set `retrieval_interval` to `0`:
 }
 ```
 
-You can also run the same one-shot summary mode locally:
+Create a local environment file for Gmail notifications:
 ```shell
-$ python3 southwest.py --fare-trackers-once
+$ mkdir -p ~/.config/auto-southwest-check-in
+$ cp deploy/systemd/fare-trackers.env.example ~/.config/auto-southwest-check-in/fare-trackers.env
+$ nano ~/.config/auto-southwest-check-in/fare-trackers.env
+$ chmod 600 ~/.config/auto-southwest-check-in/fare-trackers.env
+```
+
+The env file should contain your Gmail notification URL:
+```shell
+AUTO_SOUTHWEST_CHECK_IN_NOTIFICATION_URL="mailtos://gmail.com?user=your.email@gmail.com&pass=your-app-password"
+```
+
+Test Gmail before enabling the timer:
+```shell
+$ cd ~/auto-southwest-check-in
+$ set -a
+$ . ~/.config/auto-southwest-check-in/fare-trackers.env
+$ set +a
+$ venv/bin/python southwest.py --test-notifications
+```
+
+Install and start the timer:
+```shell
+$ mkdir -p ~/.config/systemd/user
+$ cp deploy/systemd/auto-southwest-fare-trackers.service ~/.config/systemd/user/
+$ cp deploy/systemd/auto-southwest-fare-trackers.timer ~/.config/systemd/user/
+$ systemctl --user daemon-reload
+$ systemctl --user enable --now auto-southwest-fare-trackers.timer
+$ sudo loginctl enable-linger "$USER"
+```
+
+Useful commands:
+```shell
+$ systemctl --user list-timers auto-southwest-fare-trackers.timer
+$ systemctl --user start auto-southwest-fare-trackers.service
+$ journalctl --user -u auto-southwest-fare-trackers.service -n 100 --no-pager
+```
+
+You can also run the same one-shot mode manually:
+```shell
+$ venv/bin/python southwest.py --fare-trackers-once --verbose
 ```
 
 ## Accounts and Reservations

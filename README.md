@@ -76,10 +76,10 @@ To edit `config.json` in a local browser UI, run:
 python3 southwest.py --config-ui
 ```
 
-Standalone fare trackers can also run from GitHub Actions every 8 hours. Add a repository
-secret named `AUTO_SOUTHWEST_CHECK_IN_CONFIG_JSON` containing your config, then enable the
-`Standalone Fare Trackers` workflow. When fares drop, the workflow creates one GitHub issue;
-GitHub emails users who are watching the repository.
+Standalone fare trackers can also run on a Raspberry Pi with the included `systemd` timer.
+The timer runs `southwest.py --fare-trackers-once` every 8 hours, keeps state in
+`logs/fare-tracker-state.json`, and can send fare-drop emails through Gmail using an Apprise
+notification URL. See [Raspberry Pi systemd Fare Tracking](CONFIGURATION.md#raspberry-pi-systemd-fare-tracking).
 
 If you want the latest features of the script, you can use the `develop` branch (documented changes
 can be viewed in the Changelog). However, keep in mind that changes to this branch do not ensure reliability.

@@ -1,0 +1,10 @@
+[Unit]
+Description=Auto Southwest standalone fare tracker check
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/auto-southwest-check-in
+EnvironmentFile=-%h/.config/auto-southwest-check-in/fare-trackers.env
+ExecStart=%h/auto-southwest-check-in/venv/bin/python %h/auto-southwest-check-in/southwest.py --fare-trackers-once --verbose
