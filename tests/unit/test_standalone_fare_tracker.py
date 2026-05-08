@@ -144,6 +144,31 @@ class TestStandaloneFareClient:
         with pytest.raises(FareTrackingError):
             client._select_fare(fares)
 
+    def test_exact_flight_tracker_matches_connecting_itinerary_by_all_flight_numbers(
+        self, mock_header_session: mock.Mock
+    ) -> None:
+        config = create_tracker_config("2230/5678")
+        client = StandaloneFareClient(config, mock_header_session)
+        fares = [
+            TrackedFare("USD", 12000, "2230\u200b/\u200b5678", "10:00"),
+            TrackedFare("USD", 9900, "2230\u200b/\u200b9999", "12:00"),
+        ]
+
+        selected_fare = client._select_fare(fares)
+
+        assert selected_fare.flight_numbers == "2230\u200b/\u200b5678"
+
+    def test_exact_flight_tracker_matches_connecting_itinerary_by_single_leg(
+        self, mock_header_session: mock.Mock
+    ) -> None:
+        config = create_tracker_config("2230")
+        client = StandaloneFareClient(config, mock_header_session)
+        fares = [TrackedFare("USD", 12000, "2230\u200b/\u200b5678", "10:00")]
+
+        selected_fare = client._select_fare(fares)
+
+        assert selected_fare.flight_numbers == "2230\u200b/\u200b5678"
+
     def test_normalize_response_handles_points_and_unavailable_fares(
         self, mock_header_session: mock.Mock
     ) -> None:
@@ -287,6 +312,38 @@ class TestFareTrackerState:
         state.save_prices("tracker", {"USD": fare})
 
         assert state.get_previous_prices("tracker") == {"USD": fare}
+
+    def test_state_does_not_replace_saved_price_with_higher_price(self, tmp_path: Path) -> None:
+        state = FareTrackerState(tmp_path / "state.json")
+        lower_fare = TrackedFare("USD", 12000, "1234", "10:00")
+        higher_fare = TrackedFare("USD", 14000, "1234", "10:00")
+
+        state.save_prices("tracker", {"USD": lower_fare})
+        state.save_prices("tracker", {"USD": higher_fare})
+
+        assert state.get_previous_prices("tracker") == {"USD": lower_fare}
+
+    def test_state_replaces_saved_price_with_lower_price(self, tmp_path: Path) -> None:
+        state = FareTrackerState(tmp_path / "state.json")
+        higher_fare = TrackedFare("USD", 14000, "1234", "10:00")
+        lower_fare = TrackedFare("USD", 12000, "1234", "10:00")
+
+        state.save_prices("tracker", {"USD": higher_fare})
+        state.save_prices("tracker", {"USD": lower_fare})
+
+        assert state.get_previous_prices("tracker") == {"USD": lower_fare}
+
+    def test_state_preserves_saved_currency_when_other_currency_is_updated(
+        self, tmp_path: Path
+    ) -> None:
+        state = FareTrackerState(tmp_path / "state.json")
+        usd_fare = TrackedFare("USD", 12000, "1234", "10:00")
+        points_fare = TrackedFare("PTS", 8000, "1234", "10:00")
+
+        state.save_prices("tracker", {"USD": usd_fare})
+        state.save_prices("tracker", {"PTS": points_fare})
+
+        assert state.get_previous_prices("tracker") == {"USD": usd_fare, "PTS": points_fare}
 
     def test_state_returns_empty_when_file_is_missing(self, tmp_path: Path) -> None:
         state = FareTrackerState(tmp_path / "missing.json")

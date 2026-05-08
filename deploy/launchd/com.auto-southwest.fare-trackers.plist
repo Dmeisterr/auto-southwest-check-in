@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.auto-southwest.fare-trackers</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/daniellott2/Documents/GitHub/auto-southwest-check-in</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/daniellott2/Documents/GitHub/auto-southwest-check-in/venv/bin/python</string>
+        <string>/Users/daniellott2/Documents/GitHub/auto-southwest-check-in/southwest.py</string>
+        <string>--fare-trackers-once</string>
+        <string>--verbose</string>
+    </array>
+
+    <!-- 8 hours. Change this to hours * 3600 for a different interval. -->
+    <key>StartInterval</key>
+    <integer>28800</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/daniellott2/Documents/GitHub/auto-southwest-check-in/logs/launchd-fare-trackers.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/daniellott2/Documents/GitHub/auto-southwest-check-in/logs/launchd-fare-trackers.err.log</string>
+</dict>
+</plist>

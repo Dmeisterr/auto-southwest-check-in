@@ -157,10 +157,29 @@ class FareTrackerState:
 
     def save_prices(self, tracker_key: str, fares: dict[str, TrackedFare]) -> None:
         state = self._read_state()
-        state[tracker_key] = {currency: asdict(fare) for currency, fare in fares.items()}
+        saved_fares = state.get(tracker_key, {})
+        if not isinstance(saved_fares, dict):
+            saved_fares = {}
+
+        updated_fares = dict(saved_fares)
+        for currency, fare in fares.items():
+            saved_fare = self._tracked_fare_from_state(saved_fares.get(currency))
+            if saved_fare is None or fare.amount < saved_fare.amount:
+                updated_fares[currency] = asdict(fare)
+
+        state[tracker_key] = updated_fares
 
         self.state_file_path.parent.mkdir(parents=True, exist_ok=True)
         self.state_file_path.write_text(json.dumps(state, indent=4, sort_keys=True) + "\n")
+
+    def _tracked_fare_from_state(self, fare: Any) -> TrackedFare | None:
+        if not isinstance(fare, dict):
+            return None
+
+        try:
+            return TrackedFare(**fare)
+        except TypeError:
+            return None
 
     def _read_state(self) -> JSON:
         try:
@@ -424,11 +443,10 @@ class StandaloneFareClient:
     def _select_fare(self, fares: list[TrackedFare]) -> TrackedFare:
         matching_fares = fares
         if self.config.flight_number:
-            configured_flight_number = self._normalize_flight_number(self.config.flight_number)
             matching_fares = [
                 fare
                 for fare in fares
-                if self._normalize_flight_number(fare.flight_numbers) == configured_flight_number
+                if self._flight_numbers_match(self.config.flight_number, fare.flight_numbers)
             ]
 
         if not matching_fares:
@@ -436,8 +454,27 @@ class StandaloneFareClient:
 
         return min(matching_fares, key=lambda fare: fare.amount)
 
+    def _flight_numbers_match(self, configured_flight_numbers: str, fare_flight_numbers: str) -> bool:
+        configured_numbers = self._parse_configured_flight_numbers(configured_flight_numbers)
+        fare_numbers = self._parse_configured_flight_numbers(fare_flight_numbers)
+
+        if not configured_numbers or not fare_numbers:
+            return False
+
+        if len(configured_numbers) == 1:
+            return configured_numbers[0] in fare_numbers
+
+        return configured_numbers == fare_numbers
+
+    def _parse_configured_flight_numbers(self, flight_numbers: str) -> list[str]:
+        return [
+            self._normalize_flight_number(number)
+            for number in flight_numbers.replace("\u200b", "").replace("WN", "").split("/")
+            if self._normalize_flight_number(number)
+        ]
+
     def _normalize_flight_number(self, flight_number: str) -> str:
-        return flight_number.replace("\u200b", "").replace("WN", "")
+        return flight_number.strip().replace("\u200b", "").removeprefix("WN")
 
 
 class StandaloneFareMonitor:
