@@ -9,8 +9,6 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import requests
-
 from .log import LOGS_DIRECTORY, get_logger
 from .notification_handler import NotificationHandler
 from .utils import DriverTimeoutError, RequestError, random_sleep_duration, time
@@ -24,9 +22,45 @@ JSON = dict[str, Any]
 BOOKING_SHOPPING_URL = (
     "https://www.southwest.com/api/air-booking/v1/air-booking/page/air/booking/shopping"
 )
+BOOKING_PAGE_URL = "https://www.southwest.com/air/booking/"
 CURRENCIES = ("USD", "PTS")
 REQUEST_FARE_TYPES = {"USD": "USD", "PTS": "POINTS"}
 STATE_FILE_PATH = Path(LOGS_DIRECTORY) / "fare-tracker-state.json"
+BROWSER_CONTROLLED_HEADER_PREFIXES = ("proxy-", "sec-")
+BROWSER_CONTROLLED_HEADERS = {
+    "accept-encoding",
+    "connection",
+    "content-length",
+    "cookie",
+    "host",
+    "origin",
+    "referer",
+    "user-agent",
+}
+BROWSER_FETCH_SCRIPT = """
+const url = arguments[0];
+const headers = arguments[1];
+const payload = arguments[2];
+const done = arguments[3];
+fetch(url, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+        ...headers,
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+}).then(async (response) => {
+    done({
+        status: response.status,
+        statusText: response.statusText,
+        body: await response.text()
+    });
+}).catch((error) => {
+    done({error: String(error)});
+});
+"""
 
 logger = get_logger(__name__)
 
@@ -53,16 +87,60 @@ class StandaloneFareDrop:
 
 
 class HeaderSession:
-    """Small adapter that lets the existing WebDriver header flow serve fare trackers."""
+    """Small adapter that lets fare trackers use Southwest requests from a browser session."""
 
     def __init__(self, monitor: StandaloneFareMonitor) -> None:
         self.reservation_monitor = monitor
         self.headers = {}
+        self.driver = None
+        self.webdriver = None
 
     def refresh_headers(self) -> None:
         logger.debug("Refreshing headers for standalone fare tracker")
-        webdriver = WebDriver(self)
-        webdriver.set_headers()
+        self.close()
+        self.webdriver = WebDriver(self)
+        self.driver = self.webdriver.get_driver_with_headers()
+        logger.debug("Loading Southwest booking page for browser-context shopping requests")
+        self.driver.get(BOOKING_PAGE_URL)
+
+    def make_shopping_request(self, query: JSON) -> JSON:
+        if self.driver is None:
+            raise RequestError("Browser session is not active")
+
+        result = self.driver.execute_async_script(
+            BROWSER_FETCH_SCRIPT,
+            BOOKING_SHOPPING_URL,
+            self._get_browser_fetch_headers(),
+            query,
+        )
+        if not isinstance(result, dict):
+            raise RequestError("Browser shopping request returned an invalid response")
+
+        if result.get("error"):
+            raise RequestError(str(result["error"]))
+
+        return result
+
+    def close(self) -> None:
+        if self.driver is not None and self.webdriver is not None:
+            self.webdriver._quit_driver(self.driver)
+
+        self.driver = None
+        self.webdriver = None
+
+    def _get_browser_fetch_headers(self) -> JSON:
+        headers = {}
+        for key, value in self.headers.items():
+            lower_key = key.lower()
+            if lower_key in BROWSER_CONTROLLED_HEADERS:
+                continue
+
+            if lower_key.startswith(BROWSER_CONTROLLED_HEADER_PREFIXES):
+                continue
+
+            headers[key] = value
+
+        return headers
 
 
 class FareTrackerState:
@@ -79,10 +157,29 @@ class FareTrackerState:
 
     def save_prices(self, tracker_key: str, fares: dict[str, TrackedFare]) -> None:
         state = self._read_state()
-        state[tracker_key] = {currency: asdict(fare) for currency, fare in fares.items()}
+        saved_fares = state.get(tracker_key, {})
+        if not isinstance(saved_fares, dict):
+            saved_fares = {}
+
+        updated_fares = dict(saved_fares)
+        for currency, fare in fares.items():
+            saved_fare = self._tracked_fare_from_state(saved_fares.get(currency))
+            if saved_fare is None or fare.amount < saved_fare.amount:
+                updated_fares[currency] = asdict(fare)
+
+        state[tracker_key] = updated_fares
 
         self.state_file_path.parent.mkdir(parents=True, exist_ok=True)
         self.state_file_path.write_text(json.dumps(state, indent=4, sort_keys=True) + "\n")
+
+    def _tracked_fare_from_state(self, fare: Any) -> TrackedFare | None:
+        if not isinstance(fare, dict):
+            return None
+
+        try:
+            return TrackedFare(**fare)
+        except TypeError:
+            return None
 
     def _read_state(self) -> JSON:
         try:
@@ -156,16 +253,16 @@ class StandaloneFareClient:
         while attempts < max_attempts:
             attempts += 1
             try:
-                response = requests.post(
-                    BOOKING_SHOPPING_URL, headers=self.header_session.headers, json=query
-                )
-                if response.status_code == 200:
+                response = self.header_session.make_shopping_request(query)
+                response_status = int(response.get("status", 0))
+                response_body = str(response.get("body", ""))
+                if response_status == 200:
                     logger.debug("Successfully made shopping request after %d attempts", attempts)
-                    return response.json()
+                    return json.loads(response_body)
 
-                response_body = response.content.decode()
-                error_msg = f"{response.reason} ({response.status_code})"
-            except requests.RequestException as err:
+                response_status_text = response.get("statusText") or "Error"
+                error_msg = f"{response_status_text} ({response_status})"
+            except Exception as err:
                 response_body = ""
                 error_msg = str(err)
 
@@ -346,11 +443,10 @@ class StandaloneFareClient:
     def _select_fare(self, fares: list[TrackedFare]) -> TrackedFare:
         matching_fares = fares
         if self.config.flight_number:
-            configured_flight_number = self._normalize_flight_number(self.config.flight_number)
             matching_fares = [
                 fare
                 for fare in fares
-                if self._normalize_flight_number(fare.flight_numbers) == configured_flight_number
+                if self._flight_numbers_match(self.config.flight_number, fare.flight_numbers)
             ]
 
         if not matching_fares:
@@ -358,8 +454,27 @@ class StandaloneFareClient:
 
         return min(matching_fares, key=lambda fare: fare.amount)
 
+    def _flight_numbers_match(self, configured_flight_numbers: str, fare_flight_numbers: str) -> bool:
+        configured_numbers = self._parse_configured_flight_numbers(configured_flight_numbers)
+        fare_numbers = self._parse_configured_flight_numbers(fare_flight_numbers)
+
+        if not configured_numbers or not fare_numbers:
+            return False
+
+        if len(configured_numbers) == 1:
+            return configured_numbers[0] in fare_numbers
+
+        return configured_numbers == fare_numbers
+
+    def _parse_configured_flight_numbers(self, flight_numbers: str) -> list[str]:
+        return [
+            self._normalize_flight_number(number)
+            for number in flight_numbers.replace("\u200b", "").replace("WN", "").split("/")
+            if self._normalize_flight_number(number)
+        ]
+
     def _normalize_flight_number(self, flight_number: str) -> str:
-        return flight_number.replace("\u200b", "").replace("WN", "")
+        return flight_number.strip().replace("\u200b", "").removeprefix("WN")
 
 
 class StandaloneFareMonitor:
@@ -431,6 +546,8 @@ class StandaloneFareMonitor:
             self.notification_handler.healthchecks_fail(
                 f"Failed standalone fare check,\ntracker = {tracker_key}"
             )
+        finally:
+            self.header_session.close()
 
         return []
 

@@ -7,7 +7,9 @@ from pytest_mock import MockerFixture
 from lib.config import TrackedFareConfig
 from lib.notification_handler import NotificationHandler
 from lib.standalone_fare_tracker import (
+    BOOKING_PAGE_URL,
     BOOKING_SHOPPING_URL,
+    BROWSER_FETCH_SCRIPT,
     FareTrackerState,
     FareTrackingError,
     HeaderSession,
@@ -104,6 +106,21 @@ class TestStandaloneFareClient:
         assert request_query["originationAirportCode"] == "PHX"
         assert request_query["destinationAirportCode"] == "DEN"
 
+    def test_make_shopping_request_uses_browser_session(
+        self, mock_header_session: mock.Mock, shopping_response: dict
+    ) -> None:
+        mock_header_session.make_shopping_request.return_value = {
+            "status": 200,
+            "statusText": "OK",
+            "body": '{"shoppingPage": {"cards": []}}',
+        }
+        client = StandaloneFareClient(create_tracker_config(), mock_header_session)
+
+        response = client._make_shopping_request(client._get_search_query("USD"))
+
+        assert response == {"shoppingPage": {"cards": []}}
+        mock_header_session.make_shopping_request.assert_called_once()
+
     def test_route_date_tracker_selects_cheapest_fare(
         self, mock_header_session: mock.Mock, shopping_response: dict
     ) -> None:
@@ -126,6 +143,31 @@ class TestStandaloneFareClient:
 
         with pytest.raises(FareTrackingError):
             client._select_fare(fares)
+
+    def test_exact_flight_tracker_matches_connecting_itinerary_by_all_flight_numbers(
+        self, mock_header_session: mock.Mock
+    ) -> None:
+        config = create_tracker_config("2230/5678")
+        client = StandaloneFareClient(config, mock_header_session)
+        fares = [
+            TrackedFare("USD", 12000, "2230\u200b/\u200b5678", "10:00"),
+            TrackedFare("USD", 9900, "2230\u200b/\u200b9999", "12:00"),
+        ]
+
+        selected_fare = client._select_fare(fares)
+
+        assert selected_fare.flight_numbers == "2230\u200b/\u200b5678"
+
+    def test_exact_flight_tracker_matches_connecting_itinerary_by_single_leg(
+        self, mock_header_session: mock.Mock
+    ) -> None:
+        config = create_tracker_config("2230")
+        client = StandaloneFareClient(config, mock_header_session)
+        fares = [TrackedFare("USD", 12000, "2230\u200b/\u200b5678", "10:00")]
+
+        selected_fare = client._select_fare(fares)
+
+        assert selected_fare.flight_numbers == "2230\u200b/\u200b5678"
 
     def test_normalize_response_handles_points_and_unavailable_fares(
         self, mock_header_session: mock.Mock
@@ -209,6 +251,59 @@ class TestStandaloneFareClient:
         assert fares == [TrackedFare("USD", 21240, "4507", "18:55", "product_id", "WGA")]
 
 
+class TestHeaderSession:
+    def test_refresh_headers_keeps_browser_open_on_booking_page(
+        self, mocker: MockerFixture
+    ) -> None:
+        monitor = mocker.Mock()
+        driver = mocker.Mock()
+        webdriver = mocker.patch("lib.standalone_fare_tracker.WebDriver").return_value
+        webdriver.get_driver_with_headers.return_value = driver
+        header_session = HeaderSession(monitor)
+
+        header_session.refresh_headers()
+
+        webdriver.get_driver_with_headers.assert_called_once()
+        driver.get.assert_called_once_with(BOOKING_PAGE_URL)
+        assert header_session.driver == driver
+
+    def test_make_shopping_request_executes_fetch_in_browser(
+        self, mocker: MockerFixture
+    ) -> None:
+        driver = mocker.Mock()
+        driver.execute_async_script.return_value = {"status": 200, "body": "{}"}
+        header_session = HeaderSession(mocker.Mock())
+        header_session.driver = driver
+        header_session.headers = {
+            "X-API-Key": "api-key",
+            "User-Agent": "browser-controlled",
+            "Sec-Fetch-Site": "browser-controlled",
+        }
+
+        result = header_session.make_shopping_request({"fareType": "USD"})
+
+        assert result == {"status": 200, "body": "{}"}
+        driver.execute_async_script.assert_called_once_with(
+            BROWSER_FETCH_SCRIPT,
+            BOOKING_SHOPPING_URL,
+            {"X-API-Key": "api-key"},
+            {"fareType": "USD"},
+        )
+
+    def test_close_quits_browser(self, mocker: MockerFixture) -> None:
+        driver = mocker.Mock()
+        webdriver = mocker.Mock()
+        header_session = HeaderSession(mocker.Mock())
+        header_session.driver = driver
+        header_session.webdriver = webdriver
+
+        header_session.close()
+
+        webdriver._quit_driver.assert_called_once_with(driver)
+        assert header_session.driver is None
+        assert header_session.webdriver is None
+
+
 class TestFareTrackerState:
     def test_state_reads_and_saves_prices(self, tmp_path: Path) -> None:
         state = FareTrackerState(tmp_path / "state.json")
@@ -217,6 +312,38 @@ class TestFareTrackerState:
         state.save_prices("tracker", {"USD": fare})
 
         assert state.get_previous_prices("tracker") == {"USD": fare}
+
+    def test_state_does_not_replace_saved_price_with_higher_price(self, tmp_path: Path) -> None:
+        state = FareTrackerState(tmp_path / "state.json")
+        lower_fare = TrackedFare("USD", 12000, "1234", "10:00")
+        higher_fare = TrackedFare("USD", 14000, "1234", "10:00")
+
+        state.save_prices("tracker", {"USD": lower_fare})
+        state.save_prices("tracker", {"USD": higher_fare})
+
+        assert state.get_previous_prices("tracker") == {"USD": lower_fare}
+
+    def test_state_replaces_saved_price_with_lower_price(self, tmp_path: Path) -> None:
+        state = FareTrackerState(tmp_path / "state.json")
+        higher_fare = TrackedFare("USD", 14000, "1234", "10:00")
+        lower_fare = TrackedFare("USD", 12000, "1234", "10:00")
+
+        state.save_prices("tracker", {"USD": higher_fare})
+        state.save_prices("tracker", {"USD": lower_fare})
+
+        assert state.get_previous_prices("tracker") == {"USD": lower_fare}
+
+    def test_state_preserves_saved_currency_when_other_currency_is_updated(
+        self, tmp_path: Path
+    ) -> None:
+        state = FareTrackerState(tmp_path / "state.json")
+        usd_fare = TrackedFare("USD", 12000, "1234", "10:00")
+        points_fare = TrackedFare("PTS", 8000, "1234", "10:00")
+
+        state.save_prices("tracker", {"USD": usd_fare})
+        state.save_prices("tracker", {"PTS": points_fare})
+
+        assert state.get_previous_prices("tracker") == {"USD": usd_fare, "PTS": points_fare}
 
     def test_state_returns_empty_when_file_is_missing(self, tmp_path: Path) -> None:
         state = FareTrackerState(tmp_path / "missing.json")

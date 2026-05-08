@@ -1,11 +1,9 @@
 """Runs standalone fare shopping requests against mocked Southwest responses"""
 
-from requests_mock.mocker import Mocker as RequestMocker
+import json
 
 from lib.config import TrackedFareConfig
-from lib.standalone_fare_tracker import BOOKING_SHOPPING_URL, StandaloneFareClient
-
-SHOPPING_URL = BOOKING_SHOPPING_URL
+from lib.standalone_fare_tracker import StandaloneFareClient
 
 
 def create_config(flight_number: str | None = "1234") -> TrackedFareConfig:
@@ -17,9 +15,16 @@ def create_config(flight_number: str | None = "1234") -> TrackedFareConfig:
     return config
 
 
-def test_standalone_fare_client_retrieves_cash_and_points(
-    requests_mock: RequestMocker,
-) -> None:
+class MockHeaderSession:
+    def __init__(self, responses: list[dict]) -> None:
+        self.responses = responses
+
+    def make_shopping_request(self, query: dict) -> dict:
+        response = self.responses.pop(0)
+        return {"status": 200, "statusText": "OK", "body": json.dumps(response)}
+
+
+def test_standalone_fare_client_retrieves_cash_and_points() -> None:
     cash_response = {
         "shoppingPage": {
             "cards": [
@@ -56,15 +61,8 @@ def test_standalone_fare_client_retrieves_cash_and_points(
             ]
         }
     }
-    requests_mock.post(
-        SHOPPING_URL,
-        [
-            {"json": cash_response, "status_code": 200},
-            {"json": points_response, "status_code": 200},
-        ],
-    )
 
-    header_session = type("HeaderSession", (), {"headers": {}})()
+    header_session = MockHeaderSession([cash_response, points_response])
     client = StandaloneFareClient(create_config(), header_session)
 
     fares = client.get_current_fares()
@@ -73,9 +71,7 @@ def test_standalone_fare_client_retrieves_cash_and_points(
     assert fares["PTS"].amount == 8000
 
 
-def test_standalone_fare_client_skips_unavailable_currency(
-    requests_mock: RequestMocker,
-) -> None:
+def test_standalone_fare_client_skips_unavailable_currency() -> None:
     cash_response = {
         "shoppingPage": {
             "cards": [
@@ -95,12 +91,8 @@ def test_standalone_fare_client_skips_unavailable_currency(
         }
     }
     empty_response = {"shoppingPage": {"cards": []}}
-    requests_mock.post(
-        SHOPPING_URL,
-        [{"json": cash_response, "status_code": 200}, {"json": empty_response, "status_code": 200}],
-    )
 
-    header_session = type("HeaderSession", (), {"headers": {}})()
+    header_session = MockHeaderSession([cash_response, empty_response])
     client = StandaloneFareClient(create_config(), header_session)
 
     fares = client.get_current_fares()

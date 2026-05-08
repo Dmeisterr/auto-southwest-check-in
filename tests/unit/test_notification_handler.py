@@ -53,6 +53,7 @@ class TestNotificationHandler:
 
         assert mock_apprise_notify.call_count == 2
         assert mock_apprise_notify.call_args[1]["body"] == "test notification"
+        assert mock_apprise_notify.call_args[1]["body_format"] == apprise.NotifyFormat.TEXT
 
     def test_format_flight_times_replaces_all_flight_times(self, mocker: MockerFixture) -> None:
         mock_flight1 = mocker.patch("lib.flight.Flight")
@@ -223,9 +224,19 @@ class TestNotificationHandler:
             TrackedFare("USD", 9900, "1234", "10:00"),
         )
 
-        assert "PHX to DEN" in mock_send_notification.call_args[0][0]
-        assert "$120.00 to $99.00" in mock_send_notification.call_args[0][0]
+        message = mock_send_notification.call_args[0][0]
+        assert "<h1" in message
+        assert "Southwest Fare Drop" in message
+        assert "PHX &rarr; DEN" in message
+        assert "Configured flight" in message
+        assert "Matched flight(s)" in message
+        assert "Previous:" in message
+        assert "$120.00" in message
+        assert "$99.00" in message
+        assert "Saved $21.00" in message
         assert mock_send_notification.call_args[0][1] == NotificationLevel.INFO
+        assert mock_send_notification.call_args.kwargs["body_format"] == apprise.NotifyFormat.HTML
+        assert "Route: PHX -> DEN" in mock_send_notification.call_args.kwargs["console_body"]
 
     def test_standalone_fare_drop_summary_sends_one_notification(
         self, mocker: MockerFixture
@@ -258,12 +269,25 @@ class TestNotificationHandler:
         self.handler.standalone_fare_drop_summary(drops)
 
         message = mock_send_notification.call_args[0][0]
-        assert "PHX to DEN flight 1234" in message
-        assert "$120.00 to $99.00" in message
-        assert "DEN to PHX" in message
-        assert "10,000 PTS to 9,000 PTS" in message
+        assert "Southwest Fare Drops" in message
+        assert "2 tracked fares are lower than your saved prices." in message
+        assert "Drop 1" in message
+        assert "PHX &rarr; DEN" in message
+        assert "$120.00" in message
+        assert "$99.00" in message
+        assert "Saved $21.00" in message
+        assert "Drop 2" in message
+        assert "DEN &rarr; PHX" in message
+        assert "Any" in message
+        assert "10,000 PTS" in message
+        assert "9,000 PTS" in message
+        assert "Saved 1,000 PTS" in message
         assert mock_send_notification.call_count == 1
         assert mock_send_notification.call_args[0][1] == NotificationLevel.INFO
+        assert mock_send_notification.call_args.kwargs["body_format"] == apprise.NotifyFormat.HTML
+        assert "Southwest fare drops found: 2" in mock_send_notification.call_args.kwargs[
+            "console_body"
+        ]
 
     @pytest.mark.parametrize(("url", "expected_calls"), [("http://healthchecks", 1), (None, 0)])
     def test_healthchecks_success_pings_url_only_if_configured(

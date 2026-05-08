@@ -16,6 +16,7 @@ reservation-specific configurations).
 - [Retrieval Interval](#retrieval-interval)
 - [Config UI](#config-ui)
 - [Raspberry Pi systemd Fare Tracking](#raspberry-pi-systemd-fare-tracking)
+- [macOS launchd Fare Tracking](#macos-launchd-fare-tracking)
 - [Accounts and Reservations](#accounts-and-reservations)
     * [Accounts](#accounts)
     * [Reservations](#reservations)
@@ -225,6 +226,32 @@ You can also run the same one-shot mode manually:
 $ venv/bin/python southwest.py --fare-trackers-once --verbose
 ```
 
+## macOS launchd Fare Tracking
+For macOS, use the included `launchd` plist to run standalone fare trackers on a schedule. The included plist
+runs this command every 8 hours:
+```shell
+$ venv/bin/python southwest.py --fare-trackers-once --verbose
+```
+
+The interval is controlled by `StartInterval` in
+`deploy/launchd/com.auto-southwest.fare-trackers.plist`. The value is seconds, so use `hours * 3600`.
+For example, 8 hours is `28800`.
+
+Install and start it:
+```shell
+$ cp deploy/launchd/com.auto-southwest.fare-trackers.plist ~/Library/LaunchAgents/
+$ launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.auto-southwest.fare-trackers.plist
+$ launchctl kickstart -k "gui/$(id -u)/com.auto-southwest.fare-trackers"
+```
+
+Useful commands:
+```shell
+$ launchctl print "gui/$(id -u)/com.auto-southwest.fare-trackers"
+$ launchctl bootout "gui/$(id -u)" ~/Library/LaunchAgents/com.auto-southwest.fare-trackers.plist
+$ tail -n 100 logs/launchd-fare-trackers.out.log
+$ tail -n 100 logs/launchd-fare-trackers.err.log
+```
+
 ## Accounts and Reservations
 You can also add more [accounts](#accounts) and [reservations](#reservations) to the script through the configuration file.
 Additionally, you can optionally specify [configuration options](#account-and-reservation-specific-configuration) for each
@@ -277,8 +304,11 @@ Standalone fare trackers monitor Southwest prices without requiring an existing 
 checks both cash and points, and notifies you when either price drops below the last observed price. The first successful check stores
 the current price and does not send a drop notification.
 
-If `flightNumber` is provided, only that flight is tracked. If it is omitted, the lowest available fare on the route/date is tracked.
-Round trips can be tracked by adding one tracker for each direction.
+If `flightNumber` is provided, only matching itineraries are tracked. For a nonstop flight, use the single flight number.
+For a connecting itinerary, either use one leg number like `"2230"` or the full sequence like `"2230/5678"`.
+When a single leg number is used, any itinerary containing that leg can match; use the full sequence when you need the
+exact connection. If `flightNumber` is omitted, the lowest available fare on the route/date is tracked. Round trips can
+be tracked by adding one tracker for each direction.
 ```json
 {
     "fare_trackers": [
@@ -292,6 +322,12 @@ Round trips can be tracked by adding one tracker for each direction.
             "originAirport": "DEN",
             "destinationAirport": "PHX",
             "departureDate": "2026-08-22"
+        },
+        {
+            "originAirport": "KOA",
+            "destinationAirport": "PHX",
+            "departureDate": "2026-10-22",
+            "flightNumber": "2230/5678"
         }
     ]
 }
