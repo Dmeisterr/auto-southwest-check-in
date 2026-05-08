@@ -4,5 +4,6 @@
     "notifications": [],
     "retrieval_interval": 24,
     "accounts": [],
-    "reservations": []
+    "reservations": [],
+    "fare_trackers": []
 }

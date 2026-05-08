@@ -46,6 +46,17 @@ def test_config(mocker: MockerFixture) -> None:
                 "retrieval_interval": 8,
             },
         ],
+        "fare_trackers": [
+            {"originAirport": "phx", "destinationAirport": "den", "departureDate": "2026-08-15"},
+            {
+                "originAirport": "den",
+                "destinationAirport": "phx",
+                "departureDate": "2026-08-22",
+                "flightNumber": "WN1234",
+                "notifications": [{"url": "test5.com"}],
+                "retrieval_interval": 4,
+            },
+        ],
     }
 
     mocker.patch("pathlib.Path.read_text", return_value=json.dumps(config))
@@ -55,6 +66,7 @@ def test_config(mocker: MockerFixture) -> None:
 
     assert len(config.accounts) == 2
     assert len(config.reservations) == 2
+    assert len(config.fare_trackers) == 2
 
     # Check the account configurations
     account_one = config.accounts[0]
@@ -126,4 +138,41 @@ def test_config(mocker: MockerFixture) -> None:
     )
     assert_notification_config_matches(
         reservation_two.notifications[2], "test2.com", NotificationLevel.INFO, False
+    )
+
+    # Check the standalone fare tracker configurations
+    fare_tracker_one = config.fare_trackers[0]
+    fare_tracker_two = config.fare_trackers[1]
+
+    assert fare_tracker_one.browser_path == "chrome_path"
+    assert fare_tracker_one.origin_airport == "PHX"
+    assert fare_tracker_one.destination_airport == "DEN"
+    assert fare_tracker_one.departure_date == "2026-08-15"
+    assert fare_tracker_one.flight_number is None
+    assert fare_tracker_one.retrieval_interval == 16 * 3600
+
+    assert len(fare_tracker_one.notifications) == 2
+    assert_notification_config_matches(
+        fare_tracker_one.notifications[0], "test1.com", NotificationLevel.NOTICE, False
+    )
+    assert_notification_config_matches(
+        fare_tracker_one.notifications[1], "test2.com", NotificationLevel.INFO, False
+    )
+
+    assert fare_tracker_two.browser_path == "chrome_path"
+    assert fare_tracker_two.origin_airport == "DEN"
+    assert fare_tracker_two.destination_airport == "PHX"
+    assert fare_tracker_two.departure_date == "2026-08-22"
+    assert fare_tracker_two.flight_number == "1234"
+    assert fare_tracker_two.retrieval_interval == 4 * 3600
+
+    assert len(fare_tracker_two.notifications) == 3
+    assert_notification_config_matches(
+        fare_tracker_two.notifications[0], "test5.com", NotificationLevel.INFO, False
+    )
+    assert_notification_config_matches(
+        fare_tracker_two.notifications[1], "test1.com", NotificationLevel.NOTICE, False
+    )
+    assert_notification_config_matches(
+        fare_tracker_two.notifications[2], "test2.com", NotificationLevel.INFO, False
     )

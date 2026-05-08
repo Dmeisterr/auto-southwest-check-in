@@ -11,6 +11,7 @@ from .utils import LoginError, NotificationLevel, RequestError
 if TYPE_CHECKING:
     from .flight import Flight
     from .reservation_monitor import AccountMonitor, ReservationMonitor
+    from .standalone_fare_tracker import TrackedFare
 
 MANUAL_CHECKIN_URL = "https://mobile.southwest.com/check-in"
 MANAGE_RESERVATION_URL = "https://www.southwest.com/air/manage-reservation/"
@@ -209,6 +210,29 @@ class NotificationHandler:
         )
         logger.debug("Sending lower fare notification...")
         self.send_notification(message, NotificationLevel.INFO, [flight])
+
+    def standalone_fare_drop(self, previous_fare: TrackedFare, current_fare: TrackedFare) -> None:
+        config = self.reservation_monitor.config
+        flight_info = ""
+        if config.flight_number:
+            flight_info = f" flight {config.flight_number}"
+
+        message = (
+            f"Found lower standalone fare for{flight_info} {config.origin_airport} to "
+            f"{config.destination_airport} on {config.departure_date}!\n"
+            f"{current_fare.currency_code} dropped from "
+            f"{self._format_standalone_price(previous_fare)} to "
+            f"{self._format_standalone_price(current_fare)}.\n"
+        )
+
+        logger.debug("Sending standalone lower fare notification...")
+        self.send_notification(message, NotificationLevel.INFO)
+
+    def _format_standalone_price(self, fare: TrackedFare) -> str:
+        if fare.currency_code == "USD":
+            return f"${fare.amount / 100:.2f}"
+
+        return f"{fare.amount:,} {fare.currency_code}"
 
     def healthchecks_success(self, data: str) -> None:
         if self.reservation_monitor.config.healthchecks_url is not None:

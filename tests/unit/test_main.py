@@ -5,9 +5,10 @@ from pytest_mock import MockerFixture
 from requests_mock.mocker import Mocker as RequestMocker
 
 from lib import main
-from lib.config import AccountConfig, GlobalConfig, ReservationConfig
+from lib.config import AccountConfig, GlobalConfig, ReservationConfig, TrackedFareConfig
 from lib.notification_handler import NotificationHandler
 from lib.reservation_monitor import AccountMonitor, ReservationMonitor
+from lib.standalone_fare_tracker import StandaloneFareMonitor
 
 
 @pytest.fixture(autouse=True)
@@ -33,6 +34,7 @@ def test_test_notifications_sends_to_every_url_in_config(mocker: MockerFixture) 
     config = GlobalConfig()
     config.accounts = [AccountConfig()]
     config.reservations = [ReservationConfig()]
+    config.fare_trackers = [TrackedFareConfig()]
     config._create_notification_config([{"url": "url1"}])
 
     config.accounts[0]._create_notification_config([{"url": "url1"}])
@@ -41,13 +43,16 @@ def test_test_notifications_sends_to_every_url_in_config(mocker: MockerFixture) 
     config.reservations[0]._create_notification_config([{"url": "url3"}])
     config.reservations[0]._create_notification_config([{"url": "url1"}])
 
+    config.fare_trackers[0]._create_notification_config([{"url": "url4"}])
+    config.fare_trackers[0]._create_notification_config([{"url": "url2"}])
+
     mock_send_notification = mocker.patch.object(NotificationHandler, "send_notification")
 
     main.test_notifications(config)
 
     # Make sure the configs were merged correctly so all of the URLs are only sent one test
     # notification each
-    assert len(config.notifications) == 3
+    assert len(config.notifications) == 4
 
     mock_send_notification.assert_called_once()
 
@@ -75,6 +80,15 @@ def test_set_up_reservations_starts_all_reservations(mocker: MockerFixture) -> N
     assert mock_reservation_start.call_count == len(config.reservations)
 
 
+def test_set_up_fare_trackers_starts_all_fare_trackers(mocker: MockerFixture) -> None:
+    config = GlobalConfig()
+    config.fare_trackers = [TrackedFareConfig(), TrackedFareConfig()]
+
+    mock_fare_tracker_start = mocker.patch.object(StandaloneFareMonitor, "start")
+    main.set_up_fare_trackers(config, None)
+    assert mock_fare_tracker_start.call_count == len(config.fare_trackers)
+
+
 def test_set_up_check_in_sends_test_notifications_when_flag_passed(mocker: MockerFixture) -> None:
     mock_test_notifications = mocker.patch("lib.main.test_notifications")
     with pytest.raises(SystemExit):
@@ -99,11 +113,13 @@ def test_set_up_check_in_sets_up_account_and_reservation_with_arguments(
 
     mock_set_up_accounts = mocker.patch("lib.main.set_up_accounts")
     mock_set_up_reservations = mocker.patch("lib.main.set_up_reservations")
+    mock_set_up_fare_trackers = mocker.patch("lib.main.set_up_fare_trackers")
 
     main.set_up_check_in(arguments)
 
     assert len(mock_set_up_accounts.call_args[0][0].accounts) == accounts_len
     assert len(mock_set_up_reservations.call_args[0][0].reservations) == reservations_len
+    mock_set_up_fare_trackers.assert_called_once()
     assert mock_process.join.call_count == len(mock_processes)
 
 

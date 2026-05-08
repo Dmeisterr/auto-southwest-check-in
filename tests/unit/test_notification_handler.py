@@ -4,6 +4,7 @@ from pytest_mock import MockerFixture
 
 from lib.config import NotificationConfig
 from lib.notification_handler import FLIGHT_TIME_PLACEHOLDER, NotificationHandler
+from lib.standalone_fare_tracker import TrackedFare
 from lib.utils import NotificationLevel
 
 
@@ -206,6 +207,24 @@ class TestNotificationHandler:
         mock_flight = mocker.patch("lib.flight.Flight")
 
         self.handler.lower_fare(mock_flight, "")
+        assert mock_send_notification.call_args[0][1] == NotificationLevel.INFO
+
+    def test_standalone_fare_drop_sends_lower_fare_notification(
+        self, mocker: MockerFixture
+    ) -> None:
+        mock_send_notification = mocker.patch.object(NotificationHandler, "send_notification")
+        self.handler.reservation_monitor.config.origin_airport = "PHX"
+        self.handler.reservation_monitor.config.destination_airport = "DEN"
+        self.handler.reservation_monitor.config.departure_date = "2026-08-15"
+        self.handler.reservation_monitor.config.flight_number = "1234"
+
+        self.handler.standalone_fare_drop(
+            TrackedFare("USD", 12000, "1234", "10:00"),
+            TrackedFare("USD", 9900, "1234", "10:00"),
+        )
+
+        assert "PHX to DEN" in mock_send_notification.call_args[0][0]
+        assert "$120.00 to $99.00" in mock_send_notification.call_args[0][0]
         assert mock_send_notification.call_args[0][1] == NotificationLevel.INFO
 
     @pytest.mark.parametrize(("url", "expected_calls"), [("http://healthchecks", 1), (None, 0)])

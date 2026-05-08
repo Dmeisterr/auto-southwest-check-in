@@ -13,6 +13,7 @@ from lib.config import (
     GlobalConfig,
     NotificationConfig,
     ReservationConfig,
+    TrackedFareConfig,
 )
 from lib.utils import CheckFaresOption, NotificationLevel
 
@@ -199,6 +200,20 @@ class TestConfig:
         with pytest.raises(ConfigError):
             test_config._parse_config({"notification_urls": ["test_url"]})
 
+    def test_config_schema_includes_standalone_fare_trackers(self) -> None:
+        schema_file = Path(__file__).parents[2] / "config.schema.json"
+        schema = json.loads(schema_file.read_text())
+
+        fare_trackers = schema["properties"]["fare_trackers"]
+
+        assert fare_trackers["type"] == "array"
+        assert fare_trackers["items"]["required"] == [
+            "originAirport",
+            "destinationAirport",
+            "departureDate",
+        ]
+        assert "flightNumber" in fare_trackers["items"]["properties"]
+
     def test_create_notification_config_creates_all_configs(self, mocker: MockerFixture) -> None:
         mock_config_create = mocker.patch.object(NotificationConfig, "create")
         test_config = GlobalConfig()
@@ -243,6 +258,12 @@ class TestGlobalConfig:
         mock_config_create = mocker.patch.object(ReservationConfig, "create")
         test_config = GlobalConfig()
         test_config.create_reservation_config([{"reservation": "one"}, {"reservation": "two"}])
+        assert mock_config_create.call_count == 2
+
+    def test_create_fare_tracker_config_creates_all_configs(self, mocker: MockerFixture) -> None:
+        mock_config_create = mocker.patch.object(TrackedFareConfig, "create")
+        test_config = GlobalConfig()
+        test_config.create_fare_tracker_config([{"tracker": "one"}, {"tracker": "two"}])
         assert mock_config_create.call_count == 2
 
     def test_get_config_file_path_returns_path_from_env_var(self, mocker: MockerFixture) -> None:
@@ -527,6 +548,7 @@ class TestGlobalConfig:
             {"browser_path": 0},
             {"accounts": "invalid"},
             {"reservations": "invalid"},
+            {"fare_trackers": "invalid"},
         ],
     )
     def test_parse_config_raises_exception_with_invalid_entries(self, config_content: JSON) -> None:
@@ -538,6 +560,7 @@ class TestGlobalConfig:
     def test_parse_config_sets_the_correct_config_values(self, mocker: MockerFixture) -> None:
         mock_account_config = mocker.patch.object(GlobalConfig, "create_account_config")
         mock_reservation_config = mocker.patch.object(GlobalConfig, "create_reservation_config")
+        mock_fare_tracker_config = mocker.patch.object(GlobalConfig, "create_fare_tracker_config")
 
         test_config = GlobalConfig()
         test_config._parse_config(
@@ -546,6 +569,7 @@ class TestGlobalConfig:
                 "check_fares": False,
                 "accounts": [],
                 "reservations": [],
+                "fare_trackers": [],
             }
         )
 
@@ -553,6 +577,7 @@ class TestGlobalConfig:
         assert test_config.check_fares == CheckFaresOption.NO
         mock_account_config.assert_called_once_with([])
         mock_reservation_config.assert_called_once_with([])
+        mock_fare_tracker_config.assert_called_once_with([])
 
     def test_parse_config_does_not_set_values_when_a_config_value_is_empty(self) -> None:
         test_config = GlobalConfig()
@@ -563,6 +588,7 @@ class TestGlobalConfig:
         assert test_config.browser_path == expected_config.browser_path
         assert test_config.accounts == expected_config.accounts
         assert test_config.reservations == expected_config.reservations
+        assert test_config.fare_trackers == expected_config.fare_trackers
 
 
 class TestAccountConfig:
@@ -620,6 +646,54 @@ class TestReservationConfig:
         assert test_config.confirmation_number == "num"
         assert test_config.first_name == "first"
         assert test_config.last_name == "last"
+
+
+class TestTrackedFareConfig:
+    @pytest.mark.parametrize(
+        "config_content",
+        [
+            {"destinationAirport": "DEN", "departureDate": "2026-08-15"},
+            {"originAirport": "PHX", "departureDate": "2026-08-15"},
+            {"originAirport": "PHX", "destinationAirport": "DEN"},
+            {"originAirport": 0, "destinationAirport": "DEN", "departureDate": "2026-08-15"},
+            {"originAirport": "PH", "destinationAirport": "DEN", "departureDate": "2026-08-15"},
+            {"originAirport": "PHX", "destinationAirport": "DE1", "departureDate": "2026-08-15"},
+            {"originAirport": "PHX", "destinationAirport": "DEN", "departureDate": "08/15/2026"},
+            {
+                "originAirport": "PHX",
+                "destinationAirport": "DEN",
+                "departureDate": "2026-08-15",
+                "flightNumber": 1234,
+            },
+            {
+                "originAirport": "PHX",
+                "destinationAirport": "DEN",
+                "departureDate": "2026-08-15",
+                "healthchecks_url": 0,
+            },
+        ],
+    )
+    def test_parse_config_raises_exception_on_invalid_entries(self, config_content: JSON) -> None:
+        test_config = TrackedFareConfig()
+        with pytest.raises(ConfigError):
+            test_config._parse_config(config_content)
+
+    def test_parse_config_sets_the_correct_config_values(self) -> None:
+        test_config = TrackedFareConfig()
+        tracker_config = {
+            "originAirport": "phx",
+            "destinationAirport": "den",
+            "departureDate": "2026-08-15",
+            "flightNumber": "WN1234",
+            "healthchecks_url": "https://healthchecks",
+        }
+        test_config._parse_config(tracker_config)
+
+        assert test_config.origin_airport == "PHX"
+        assert test_config.destination_airport == "DEN"
+        assert test_config.departure_date == "2026-08-15"
+        assert test_config.flight_number == "1234"
+        assert test_config.healthchecks_url == "https://healthchecks"
 
 
 class TestNotificationConfig:

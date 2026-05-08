@@ -17,6 +17,7 @@ reservation-specific configurations).
 - [Accounts and Reservations](#accounts-and-reservations)
     * [Accounts](#accounts)
     * [Reservations](#reservations)
+- [Standalone Fare Trackers](#standalone-fare-trackers)
 - [Healthchecks URL](#healthchecks-url)
 
 ## Check Fares
@@ -164,13 +165,44 @@ and/or not provide reservation information as arguments.
 }
 ```
 
+## Standalone Fare Trackers
+Default: [] \
+Type: List
+
+Standalone fare trackers monitor Southwest prices without requiring an existing reservation. Each tracker searches a one-way route/date,
+checks both cash and points, and notifies you when either price drops below the last observed price. The first successful check stores
+the current price and does not send a drop notification.
+
+If `flightNumber` is provided, only that flight is tracked. If it is omitted, the lowest available fare on the route/date is tracked.
+Round trips can be tracked by adding one tracker for each direction.
+```json
+{
+    "fare_trackers": [
+        {
+            "originAirport": "PHX",
+            "destinationAirport": "DEN",
+            "departureDate": "2026-08-15",
+            "flightNumber": "1234"
+        },
+        {
+            "originAirport": "DEN",
+            "destinationAirport": "PHX",
+            "departureDate": "2026-08-22"
+        }
+    ]
+}
+```
+
 ### Account and Reservation-specific configuration
-Setting specific configuration values for an account or reservation allows you to fully customize how you want them to be
+Setting specific configuration values for an account, reservation, or standalone fare tracker allows you to fully customize how you want them to be
 monitored by the script. Here is a list of configuration values that can be applied to an individual account or reservation:
 - [Check Fares](#check-fares)
 - [Notifications](#notifications)
 - [Retrieval Interval](#retrieval-interval)
 - [Healthchecks URL](#healthchecks-url)
+
+Standalone fare trackers support [Notifications](#notifications), [Retrieval Interval](#retrieval-interval), and
+[Healthchecks URL](#healthchecks-url).
 
 Not all options have to be specified for each account or reservation. If an option is not specified, the top-level value is used
 (or the default value if no top-level value is specified either) with exception to the Healthchecks URL. Any accounts or reservations
@@ -218,7 +250,8 @@ Monitor successful and failed fare checks using a [Healthchecks.io] URL. When a 
 fails, the `/fail` endpoint of your Healthchecks URL will be pinged to notify you of the failure.
 
 This configuration option can only be applied within reservation and account configurations (specifying it at the top-level
-will have no effect). Due to this, no environment variable is provided as a replacement for this configuration option.
+will have no effect). It can also be applied within standalone fare trackers. Due to this, no environment variable is
+provided as a replacement for this configuration option.
 ```json
 {
     "accounts": [

@@ -132,16 +132,21 @@ def test_accounts_and_reservations_from_config(mocker: MockerFixture) -> None:
         "reservations": [
             {"confirmationNumber": "TEST", "firstName": "Nana", "lastName": "Linus"},
         ],
+        "fare_trackers": [
+            {"originAirport": "PHX", "destinationAirport": "DEN", "departureDate": "2026-08-15"}
+        ],
     }
     mocker.patch("pathlib.Path.read_text", return_value=json.dumps(config))
 
     mock_process = mocker.patch("multiprocessing.Process").return_value
-    mocker.patch("multiprocessing.active_children", return_value=[mock_process, mock_process])
+    mocker.patch(
+        "multiprocessing.active_children", return_value=[mock_process, mock_process, mock_process]
+    )
 
     main.main([], "test_version")
 
-    assert mock_process.start.call_count == 2
-    assert mock_process.join.call_count == 2
+    assert mock_process.start.call_count == 3
+    assert mock_process.join.call_count == 3
 
 
 def test_error_on_invalid_arguments() -> None:

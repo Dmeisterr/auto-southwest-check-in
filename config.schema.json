@@ -66,6 +66,41 @@
                 "required": ["confirmationNumber", "firstName", "lastName"],
                 "additionalProperties": false
             }
+        },
+        "fare_trackers": {
+            "type": "array",
+            "description": "List of standalone fare trackers",
+            "default": [],
+            "items": {
+                "type": "object",
+                "properties": {
+                    "originAirport": {
+                        "type": "string",
+                        "description": "Origin airport code",
+                        "pattern": "^[A-Za-z]{3}$"
+                    },
+                    "destinationAirport": {
+                        "type": "string",
+                        "description": "Destination airport code",
+                        "pattern": "^[A-Za-z]{3}$"
+                    },
+                    "departureDate": {
+                        "type": "string",
+                        "description": "Departure date in YYYY-MM-DD format",
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "flightNumber": {
+                        "type": "string",
+                        "description": "Optional Southwest flight number to track",
+                        "minLength": 1
+                    },
+                    "healthchecks_url": { "$ref": "#/$defs/healthchecks_url" },
+                    "notifications": { "$ref": "#/$defs/notifications" },
+                    "retrieval_interval": { "$ref": "#/$defs/retrieval_interval" }
+                },
+                "required": ["originAirport", "destinationAirport", "departureDate"],
+                "additionalProperties": false
+            }
         }
     },
     "additionalProperties": false,

@@ -12,6 +12,7 @@ from lib import log
 
 from .config import IS_DOCKER, GlobalConfig, ReservationConfig
 from .reservation_monitor import AccountMonitor, ReservationMonitor
+from .standalone_fare_tracker import StandaloneFareMonitor
 
 IP_TIMEZONE_URL = "https://ipinfo.io/timezone"
 LOG_FILE = "logs/auto-southwest-check-in.log"
@@ -43,6 +44,9 @@ def test_notifications(config: GlobalConfig) -> None:
     for reservation in config.reservations:
         config.merge_notification_config(reservation)
 
+    for fare_tracker in config.fare_trackers:
+        config.merge_notification_config(fare_tracker)
+
     new_config = ReservationConfig()
     new_config.notifications = config.notifications
     reservation_monitor = ReservationMonitor(new_config)
@@ -66,6 +70,12 @@ def set_up_reservations(config: GlobalConfig, lock: multiprocessing.Lock) -> Non
     for reservation in config.reservations:
         reservation_monitor = ReservationMonitor(reservation, lock)
         reservation_monitor.start()
+
+
+def set_up_fare_trackers(config: GlobalConfig, lock: multiprocessing.Lock) -> None:
+    for fare_tracker in config.fare_trackers:
+        fare_monitor = StandaloneFareMonitor(fare_tracker, lock)
+        fare_monitor.start()
 
 
 def set_up_check_in(arguments: list[str]) -> None:
@@ -99,17 +109,21 @@ def set_up_check_in(arguments: list[str]) -> None:
 
     num_accounts = len(config.accounts)
     num_reservations = len(config.reservations)
+    num_fare_trackers = len(config.fare_trackers)
     logger.info(
-        "Monitoring %s %s and %s %s\n",
+        "Monitoring %s %s, %s %s, and %s standalone fare %s\n",
         num_accounts,
         pluralize("account", num_accounts),
         num_reservations,
         pluralize("reservation", num_reservations),
+        num_fare_trackers,
+        pluralize("tracker", num_fare_trackers),
     )
 
     lock = multiprocessing.Lock()
     set_up_accounts(config, lock)
     set_up_reservations(config, lock)
+    set_up_fare_trackers(config, lock)
 
     # Keep the main process alive until all processes are done so it can handle
     # keyboard interrupts

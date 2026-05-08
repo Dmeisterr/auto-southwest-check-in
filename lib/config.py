@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -137,7 +138,9 @@ class Config:
         if "notification_urls" in config:
             raise ConfigError(
                 "'notification_urls' has been removed. Use 'notifications' instead.\nTo update "
-                "your config, see https://github.com/jdholtz/auto-southwest-check-in/blob/master/CONFIGURATION.md#notifications"
+                "your config, see "
+                "https://github.com/jdholtz/auto-southwest-check-in/blob/master/"
+                "CONFIGURATION.md#notifications"
             )
 
     def _create_notification_config(self, notifications: list[JSON]) -> None:
@@ -154,6 +157,7 @@ class GlobalConfig(Config):
         super().__init__()
         self.accounts = []
         self.reservations = []
+        self.fare_trackers = []
 
     def initialize(self) -> None:
         logger.debug("Initializing configuration file")
@@ -184,6 +188,13 @@ class GlobalConfig(Config):
             reservation_config = ReservationConfig()
             reservation_config.create(reservation_json, self)
             self.reservations.append(reservation_config)
+
+    def create_fare_tracker_config(self, fare_trackers: list[JSON]) -> None:
+        logger.debug("Creating configurations for %d standalone fare trackers", len(fare_trackers))
+        for tracker_json in fare_trackers:
+            tracker_config = TrackedFareConfig()
+            tracker_config.create(tracker_json, self)
+            self.fare_trackers.append(tracker_config)
 
     def _get_config_file_path(self) -> Path:
         """
@@ -335,6 +346,14 @@ class GlobalConfig(Config):
 
             self.create_reservation_config(reservations)
 
+        if "fare_trackers" in config:
+            fare_trackers = config["fare_trackers"]
+
+            if not isinstance(fare_trackers, list):
+                raise ConfigError("'fare_trackers' must be a list")
+
+            self.create_fare_tracker_config(fare_trackers)
+
 
 class AccountConfig(Config):
     def __init__(self) -> None:
@@ -380,6 +399,57 @@ class ReservationConfig(Config):
         self.confirmation_number = config["confirmationNumber"]
         self.first_name = config["firstName"]
         self.last_name = config["lastName"]
+
+
+class TrackedFareConfig(Config):
+    def __init__(self) -> None:
+        super().__init__()
+        self.origin_airport = None
+        self.destination_airport = None
+        self.departure_date = None
+        self.flight_number = None
+
+    def _parse_config(self, config: JSON) -> None:
+        super()._parse_config(config)
+
+        keys = ["originAirport", "destinationAirport", "departureDate"]
+        for key in keys:
+            if key not in config:
+                raise ConfigError(f"'{key}' must be in every fare tracker")
+
+            if not isinstance(config[key], str):
+                raise ConfigError(f"'{key}' in fare tracker must be a string")
+
+        self.origin_airport = self._parse_airport(config["originAirport"], "originAirport")
+        self.destination_airport = self._parse_airport(
+            config["destinationAirport"], "destinationAirport"
+        )
+        self.departure_date = self._parse_departure_date(config["departureDate"])
+
+        if "flightNumber" in config:
+            if not isinstance(config["flightNumber"], str):
+                raise ConfigError("'flightNumber' in fare tracker must be a string")
+
+            self.flight_number = config["flightNumber"].removeprefix("WN").strip()
+            if not self.flight_number:
+                raise ConfigError("'flightNumber' in fare tracker must not be empty")
+
+    def _parse_airport(self, airport: str, config_key: str) -> str:
+        airport = airport.upper().strip()
+        if len(airport) != 3 or not airport.isalpha():
+            raise ConfigError(f"'{config_key}' in fare tracker must be a 3-letter airport code")
+
+        return airport
+
+    def _parse_departure_date(self, departure_date: str) -> str:
+        try:
+            datetime.strptime(departure_date, "%Y-%m-%d")
+        except ValueError as err:
+            raise ConfigError(
+                "'departureDate' in fare tracker must be in YYYY-MM-DD format"
+            ) from err
+
+        return departure_date
 
 
 class NotificationConfig(Config):
