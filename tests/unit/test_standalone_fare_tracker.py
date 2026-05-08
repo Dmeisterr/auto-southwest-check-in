@@ -7,7 +7,9 @@ from pytest_mock import MockerFixture
 from lib.config import TrackedFareConfig
 from lib.notification_handler import NotificationHandler
 from lib.standalone_fare_tracker import (
+    BOOKING_PAGE_URL,
     BOOKING_SHOPPING_URL,
+    BROWSER_FETCH_SCRIPT,
     FareTrackerState,
     FareTrackingError,
     HeaderSession,
@@ -103,6 +105,21 @@ class TestStandaloneFareClient:
         assert request_query["fareType"] == "USD"
         assert request_query["originationAirportCode"] == "PHX"
         assert request_query["destinationAirportCode"] == "DEN"
+
+    def test_make_shopping_request_uses_browser_session(
+        self, mock_header_session: mock.Mock, shopping_response: dict
+    ) -> None:
+        mock_header_session.make_shopping_request.return_value = {
+            "status": 200,
+            "statusText": "OK",
+            "body": '{"shoppingPage": {"cards": []}}',
+        }
+        client = StandaloneFareClient(create_tracker_config(), mock_header_session)
+
+        response = client._make_shopping_request(client._get_search_query("USD"))
+
+        assert response == {"shoppingPage": {"cards": []}}
+        mock_header_session.make_shopping_request.assert_called_once()
 
     def test_route_date_tracker_selects_cheapest_fare(
         self, mock_header_session: mock.Mock, shopping_response: dict
@@ -207,6 +224,59 @@ class TestStandaloneFareClient:
         fares = client._normalize_response(response, "USD")
 
         assert fares == [TrackedFare("USD", 21240, "4507", "18:55", "product_id", "WGA")]
+
+
+class TestHeaderSession:
+    def test_refresh_headers_keeps_browser_open_on_booking_page(
+        self, mocker: MockerFixture
+    ) -> None:
+        monitor = mocker.Mock()
+        driver = mocker.Mock()
+        webdriver = mocker.patch("lib.standalone_fare_tracker.WebDriver").return_value
+        webdriver.get_driver_with_headers.return_value = driver
+        header_session = HeaderSession(monitor)
+
+        header_session.refresh_headers()
+
+        webdriver.get_driver_with_headers.assert_called_once()
+        driver.get.assert_called_once_with(BOOKING_PAGE_URL)
+        assert header_session.driver == driver
+
+    def test_make_shopping_request_executes_fetch_in_browser(
+        self, mocker: MockerFixture
+    ) -> None:
+        driver = mocker.Mock()
+        driver.execute_async_script.return_value = {"status": 200, "body": "{}"}
+        header_session = HeaderSession(mocker.Mock())
+        header_session.driver = driver
+        header_session.headers = {
+            "X-API-Key": "api-key",
+            "User-Agent": "browser-controlled",
+            "Sec-Fetch-Site": "browser-controlled",
+        }
+
+        result = header_session.make_shopping_request({"fareType": "USD"})
+
+        assert result == {"status": 200, "body": "{}"}
+        driver.execute_async_script.assert_called_once_with(
+            BROWSER_FETCH_SCRIPT,
+            BOOKING_SHOPPING_URL,
+            {"X-API-Key": "api-key"},
+            {"fareType": "USD"},
+        )
+
+    def test_close_quits_browser(self, mocker: MockerFixture) -> None:
+        driver = mocker.Mock()
+        webdriver = mocker.Mock()
+        header_session = HeaderSession(mocker.Mock())
+        header_session.driver = driver
+        header_session.webdriver = webdriver
+
+        header_session.close()
+
+        webdriver._quit_driver.assert_called_once_with(driver)
+        assert header_session.driver is None
+        assert header_session.webdriver is None
 
 
 class TestFareTrackerState:

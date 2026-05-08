@@ -96,14 +96,22 @@ class WebDriver:
         The check-in URL is requested. Since another request contains valid headers
         during the initial request, those headers are set in the CheckIn Scheduler.
         """
+        driver = self.get_driver_with_headers()
+        self._quit_driver(driver)
+
+    def get_driver_with_headers(self) -> Driver:
+        """
+        Start a browser session, load Southwest, and wait until usable API headers are captured.
+
+        The caller owns the returned driver and must close it with `_quit_driver`.
+        """
         driver = self._get_driver()
         self._take_debug_screenshot(driver, "pre_headers.png")
         logger.debug("Waiting for valid headers")
         # Once this attribute is set, the headers have been set in the checkin_scheduler
         self._wait_for_attribute(driver, "headers_set")
         self._take_debug_screenshot(driver, "post_headers.png")
-
-        self._quit_driver(driver)
+        return driver
 
     def get_reservations(self, account_monitor: AccountMonitor) -> list[JSON]:
         """
