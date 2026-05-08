@@ -263,6 +263,7 @@ class TestWebDriver:
             ({"unnecessary": "header"}, {}),
             ({"X-API-Key": "API Key"}, {"X-API-Key": "API Key"}),
             ({"X-Channel-ID": "ID"}, {"X-Channel-ID": "ID"}),
+            ({"X-User-Experience-ID": "ID"}, {"X-User-Experience-ID": "ID"}),
             ({"User-Agent": "Chrome"}, {"User-Agent": "Chrome"}),
             ({"EE30zvQLWf-b": "secret"}, {"EE30zvQLWf-b": "secret"}),
         ],

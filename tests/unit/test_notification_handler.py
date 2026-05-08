@@ -4,7 +4,7 @@ from pytest_mock import MockerFixture
 
 from lib.config import NotificationConfig
 from lib.notification_handler import FLIGHT_TIME_PLACEHOLDER, NotificationHandler
-from lib.standalone_fare_tracker import TrackedFare
+from lib.standalone_fare_tracker import StandaloneFareDrop, TrackedFare
 from lib.utils import NotificationLevel
 
 
@@ -225,6 +225,44 @@ class TestNotificationHandler:
 
         assert "PHX to DEN" in mock_send_notification.call_args[0][0]
         assert "$120.00 to $99.00" in mock_send_notification.call_args[0][0]
+        assert mock_send_notification.call_args[0][1] == NotificationLevel.INFO
+
+    def test_standalone_fare_drop_summary_sends_one_notification(
+        self, mocker: MockerFixture
+    ) -> None:
+        mock_send_notification = mocker.patch.object(NotificationHandler, "send_notification")
+        config_one = mocker.Mock()
+        config_one.origin_airport = "PHX"
+        config_one.destination_airport = "DEN"
+        config_one.departure_date = "2026-08-15"
+        config_one.flight_number = "1234"
+        config_two = mocker.Mock()
+        config_two.origin_airport = "DEN"
+        config_two.destination_airport = "PHX"
+        config_two.departure_date = "2026-08-22"
+        config_two.flight_number = None
+
+        drops = [
+            StandaloneFareDrop(
+                config_one,
+                TrackedFare("USD", 12000, "1234", "10:00"),
+                TrackedFare("USD", 9900, "1234", "10:00"),
+            ),
+            StandaloneFareDrop(
+                config_two,
+                TrackedFare("PTS", 10000, "2345", "12:00"),
+                TrackedFare("PTS", 9000, "2345", "12:00"),
+            ),
+        ]
+
+        self.handler.standalone_fare_drop_summary(drops)
+
+        message = mock_send_notification.call_args[0][0]
+        assert "PHX to DEN flight 1234" in message
+        assert "$120.00 to $99.00" in message
+        assert "DEN to PHX" in message
+        assert "10,000 PTS to 9,000 PTS" in message
+        assert mock_send_notification.call_count == 1
         assert mock_send_notification.call_args[0][1] == NotificationLevel.INFO
 
     @pytest.mark.parametrize(("url", "expected_calls"), [("http://healthchecks", 1), (None, 0)])

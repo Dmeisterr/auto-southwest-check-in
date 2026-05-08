@@ -275,7 +275,11 @@ class WebDriver:
     def _get_needed_headers(self, request_headers: JSON) -> JSON:
         headers = {}
         for header in request_headers:
-            if re.match(r"x-api-key|x-channel-id|user-agent|^[\w-]+?-\w$", header, re.IGNORECASE):
+            if re.match(
+                r"x-api-key|x-channel-id|x-user-experience-id|user-agent|^[\w-]+?-\w$",
+                header,
+                re.IGNORECASE,
+            ):
                 headers[header] = request_headers[header]
 
         return headers

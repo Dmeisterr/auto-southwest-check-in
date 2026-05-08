@@ -44,6 +44,7 @@ EXPECTED_HEADERS = {
     "User-Agent": "test_agent",
     "X-API-Key": "test_key",
     "X-Channel-ID": "test_channel_id",
+    "X-User-Experience-ID": "test_ux_id",
     "EE30zvQLWf-f": "test_f",
     "EE30zvQLWf-b": "test_b",
     "EE30zvQLWf-c": "test_c",

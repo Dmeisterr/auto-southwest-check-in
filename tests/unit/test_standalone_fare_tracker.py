@@ -84,8 +84,8 @@ class TestStandaloneFareClient:
     def test_get_current_fare_requests_shopping_results(
         self, mocker: MockerFixture, mock_header_session: mock.Mock, shopping_response: dict
     ) -> None:
-        mock_make_request = mocker.patch(
-            "lib.standalone_fare_tracker.make_request", return_value=shopping_response
+        mock_make_request = mocker.patch.object(
+            StandaloneFareClient, "_make_shopping_request", return_value=shopping_response
         )
         client = StandaloneFareClient(create_tracker_config(), mock_header_session)
 
@@ -96,12 +96,13 @@ class TestStandaloneFareClient:
         assert fare.fare_product_id == "BASIC"
         assert fare.fare_label == "Basic"
 
-        request_args = mock_make_request.call_args[0]
-        assert request_args[0] == "POST"
-        assert request_args[1] == BOOKING_SHOPPING_URL
-        assert request_args[3]["currencyType"] == "USD"
-        assert request_args[3]["originationAirportCode"] == "PHX"
-        assert request_args[3]["destinationAirportCode"] == "DEN"
+        request_query = mock_make_request.call_args[0][0]
+        assert BOOKING_SHOPPING_URL == (
+            "https://www.southwest.com/api/air-booking/v1/air-booking/page/air/booking/shopping"
+        )
+        assert request_query["fareType"] == "USD"
+        assert request_query["originationAirportCode"] == "PHX"
+        assert request_query["destinationAirportCode"] == "DEN"
 
     def test_route_date_tracker_selects_cheapest_fare(
         self, mock_header_session: mock.Mock, shopping_response: dict
@@ -139,7 +140,7 @@ class TestStandaloneFareClient:
                             {
                                 "_meta": {"fareProductId": "BASIC"},
                                 "price": {
-                                    "totalFare": {"amount": "8,000", "currencyCode": "PTS"}
+                                    "totalFare": {"amount": "8,000", "currencyCode": "POINTS"}
                                 },
                             },
                             {"_meta": {"fareProductId": "CHOICE"}},
@@ -153,6 +154,59 @@ class TestStandaloneFareClient:
         fares = client._normalize_response(response, "PTS")
 
         assert fares == [TrackedFare("PTS", 8000, "1234", "10:00", "BASIC", None)]
+
+    def test_normalize_response_handles_live_shopping_response_shape(
+        self, mock_header_session: mock.Mock
+    ) -> None:
+        response = {
+            "data": {
+                "searchResults": {
+                    "airProducts": [
+                        {
+                            "details": [
+                                {
+                                    "departureTime": "18:55",
+                                    "flightNumbers": ["4507"],
+                                    "fareProducts": {
+                                        "ADULT": {
+                                            "WGA": {
+                                                "productId": "product_id",
+                                                "availabilityStatus": "AVAILABLE",
+                                                "fare": {
+                                                    "baseFare": {
+                                                        "currencyCode": "USD",
+                                                        "value": "183.26",
+                                                    },
+                                                    "totalFare": {
+                                                        "currencyCode": "USD",
+                                                        "value": "212.40",
+                                                    }
+                                                },
+                                            },
+                                            "BUS": {
+                                                "productId": "business_product_id",
+                                                "availabilityStatus": "AVAILABLE",
+                                                "fare": {
+                                                    "totalFare": {
+                                                        "currencyCode": "USD",
+                                                        "value": "397.40",
+                                                    }
+                                                },
+                                            },
+                                        }
+                                    },
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        }
+        client = StandaloneFareClient(create_tracker_config("4507"), mock_header_session)
+
+        fares = client._normalize_response(response, "USD")
+
+        assert fares == [TrackedFare("USD", 21240, "4507", "18:55", "product_id", "WGA")]
 
 
 class TestFareTrackerState:
@@ -195,8 +249,9 @@ class TestStandaloneFareMonitor:
         self.state.get_previous_prices.return_value = {}
         mock_fare_drop = mocker.patch.object(NotificationHandler, "standalone_fare_drop")
 
-        self.monitor._check()
+        drops = self.monitor._check()
 
+        assert drops == []
         mock_fare_drop.assert_not_called()
         self.state.save_prices.assert_called_once_with("PHX-DEN-2026-08-15-1234", current_fares)
 
@@ -208,10 +263,26 @@ class TestStandaloneFareMonitor:
         self.state.get_previous_prices.return_value = previous_fares
         mock_fare_drop = mocker.patch.object(NotificationHandler, "standalone_fare_drop")
 
-        self.monitor._check()
+        drops = self.monitor._check()
 
+        assert len(drops) == 1
+        assert drops[0].previous_fare == previous_fares["USD"]
+        assert drops[0].current_fare == current_fares["USD"]
         mock_fare_drop.assert_called_once_with(previous_fares["USD"], current_fares["USD"])
         self.state.save_prices.assert_called_once_with("PHX-DEN-2026-08-15-1234", current_fares)
+
+    def test_check_can_skip_individual_drop_notifications(self, mocker: MockerFixture) -> None:
+        previous_fares = {"USD": TrackedFare("USD", 12000, "1234", "10:00")}
+        current_fares = {"USD": TrackedFare("USD", 9900, "1234", "10:00")}
+        mocker.patch.object(HeaderSession, "refresh_headers")
+        mocker.patch.object(StandaloneFareClient, "get_current_fares", return_value=current_fares)
+        self.state.get_previous_prices.return_value = previous_fares
+        mock_fare_drop = mocker.patch.object(NotificationHandler, "standalone_fare_drop")
+
+        drops = self.monitor._check(send_notifications=False)
+
+        assert len(drops) == 1
+        mock_fare_drop.assert_not_called()
 
     @pytest.mark.parametrize("exception", [DriverTimeoutError, RequestError(""), FareTrackingError])
     def test_check_catches_expected_errors(

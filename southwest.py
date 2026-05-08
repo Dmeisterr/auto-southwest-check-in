@@ -13,6 +13,12 @@ Log into your account:
     python3 southwest.py [options] USERNAME PASSWORD
 
 Options:
+    --config-ui            Start a local web UI for editing config.json and exit
+    --config-ui-port PORT  Port to use with --config-ui (default: 8765)
+    --fare-trackers-once   Check standalone fare trackers once, send one summary notification,
+                           and exit
+    --fare-trackers-summary-file PATH
+                           Write a Markdown summary file when --fare-trackers-once finds drops
     --test-notifications   Test the notification URLs configuration and exit
     --debug-screenshots    Take screenshots of the browser for debugging purposes. Screenshots
                            will be stored in the 'logs/' directory

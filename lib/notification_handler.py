@@ -11,7 +11,7 @@ from .utils import LoginError, NotificationLevel, RequestError
 if TYPE_CHECKING:
     from .flight import Flight
     from .reservation_monitor import AccountMonitor, ReservationMonitor
-    from .standalone_fare_tracker import TrackedFare
+    from .standalone_fare_tracker import StandaloneFareDrop, TrackedFare
 
 MANUAL_CHECKIN_URL = "https://mobile.southwest.com/check-in"
 MANAGE_RESERVATION_URL = "https://www.southwest.com/air/manage-reservation/"
@@ -226,6 +226,27 @@ class NotificationHandler:
         )
 
         logger.debug("Sending standalone lower fare notification...")
+        self.send_notification(message, NotificationLevel.INFO)
+
+    def standalone_fare_drop_summary(self, drops: list[StandaloneFareDrop]) -> None:
+        if not drops:
+            return
+
+        message = "Found lower standalone fares:\n"
+        for drop in drops:
+            config = drop.config
+            flight_info = ""
+            if config.flight_number:
+                flight_info = f" flight {config.flight_number}"
+
+            message += (
+                f"{config.origin_airport} to {config.destination_airport}{flight_info} on "
+                f"{config.departure_date}: {drop.current_fare.currency_code} dropped from "
+                f"{self._format_standalone_price(drop.previous_fare)} to "
+                f"{self._format_standalone_price(drop.current_fare)}\n"
+            )
+
+        logger.debug("Sending standalone lower fare summary notification...")
         self.send_notification(message, NotificationLevel.INFO)
 
     def _format_standalone_price(self, fare: TrackedFare) -> str:

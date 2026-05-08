@@ -14,6 +14,8 @@ reservation-specific configurations).
     * [Test the Notifications](#test-the-notifications)
 - [Browser Path](#browser-path)
 - [Retrieval Interval](#retrieval-interval)
+- [Config UI](#config-ui)
+- [GitHub Actions Fare Tracking](#github-actions-fare-tracking)
 - [Accounts and Reservations](#accounts-and-reservations)
     * [Accounts](#accounts)
     * [Reservations](#reservations)
@@ -119,6 +121,48 @@ disable account/fare monitoring, set this option to `0` (The account/fares will 
 {
     "retrieval_interval": 24
 }
+```
+
+## Config UI
+You can edit `config.json` from a local browser UI:
+```shell
+$ python3 southwest.py --config-ui
+```
+
+The default URL is `http://127.0.0.1:8765`. To use a different port:
+```shell
+$ python3 southwest.py --config-ui --config-ui-port 9090
+```
+
+## GitHub Actions Fare Tracking
+The repository includes a scheduled GitHub Actions workflow that checks standalone fare trackers every 8 hours.
+It restores `logs/fare-tracker-state.json`, runs the trackers once, creates one GitHub issue if any cash or
+points prices drop, and saves the updated state for the next run. GitHub will email users who are watching
+the repository, so no email username or password is needed.
+
+Create a repository secret named `AUTO_SOUTHWEST_CHECK_IN_CONFIG_JSON` containing your full `config.json` content.
+Set `retrieval_interval` to `0`:
+```json
+{
+    "$schema": "config.schema.json",
+    "retrieval_interval": 0,
+    "notifications": [],
+    "accounts": [],
+    "reservations": [],
+    "fare_trackers": [
+        {
+            "originAirport": "PHX",
+            "destinationAirport": "BNA",
+            "departureDate": "2026-07-02",
+            "flightNumber": "4507"
+        }
+    ]
+}
+```
+
+You can also run the same one-shot summary mode locally:
+```shell
+$ python3 southwest.py --fare-trackers-once
 ```
 
 ## Accounts and Reservations

@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 import pytest
 from pytest_mock import MockerFixture
@@ -8,7 +9,7 @@ from lib import main
 from lib.config import AccountConfig, GlobalConfig, ReservationConfig, TrackedFareConfig
 from lib.notification_handler import NotificationHandler
 from lib.reservation_monitor import AccountMonitor, ReservationMonitor
-from lib.standalone_fare_tracker import StandaloneFareMonitor
+from lib.standalone_fare_tracker import StandaloneFareDrop, StandaloneFareMonitor, TrackedFare
 
 
 @pytest.fixture(autouse=True)
@@ -96,6 +97,90 @@ def test_set_up_check_in_sends_test_notifications_when_flag_passed(mocker: Mocke
     mock_test_notifications.assert_called_once()
 
 
+def test_set_up_check_in_checks_fare_trackers_once_when_flag_passed(
+    mocker: MockerFixture,
+) -> None:
+    mock_check_fare_trackers_once = mocker.patch("lib.main.check_fare_trackers_once")
+
+    with pytest.raises(SystemExit):
+        main.set_up_check_in(["--fare-trackers-once"])
+
+    mock_check_fare_trackers_once.assert_called_once()
+
+
+def test_set_up_check_in_passes_fare_tracker_summary_file(
+    mocker: MockerFixture,
+) -> None:
+    mock_check_fare_trackers_once = mocker.patch("lib.main.check_fare_trackers_once")
+
+    with pytest.raises(SystemExit):
+        main.set_up_check_in(["--fare-trackers-once", "--fare-trackers-summary-file", "drops.md"])
+
+    assert mock_check_fare_trackers_once.call_args[0][1] == Path("drops.md")
+
+
+def test_check_fare_trackers_once_sends_one_summary_notification(
+    mocker: MockerFixture,
+) -> None:
+    config = GlobalConfig()
+    config.fare_trackers = [TrackedFareConfig(), TrackedFareConfig()]
+    drops = ["drop_one", "drop_two"]
+    mock_check = mocker.patch.object(
+        StandaloneFareMonitor, "_check", side_effect=[[drops[0]], [drops[1]]]
+    )
+    mock_summary = mocker.patch.object(NotificationHandler, "standalone_fare_drop_summary")
+
+    main.check_fare_trackers_once(config)
+
+    assert mock_check.call_count == 2
+    mock_summary.assert_called_once_with(drops)
+
+
+def test_check_fare_trackers_once_does_not_notify_when_no_drops(
+    mocker: MockerFixture,
+) -> None:
+    config = GlobalConfig()
+    config.fare_trackers = [TrackedFareConfig()]
+    mocker.patch.object(StandaloneFareMonitor, "_check", return_value=[])
+    mock_summary = mocker.patch.object(NotificationHandler, "standalone_fare_drop_summary")
+
+    main.check_fare_trackers_once(config)
+
+    mock_summary.assert_not_called()
+
+
+def test_write_fare_tracker_summary_writes_markdown(tmp_path: Path) -> None:
+    config = TrackedFareConfig()
+    config.origin_airport = "PHX"
+    config.destination_airport = "DEN"
+    config.departure_date = "2026-08-15"
+    config.flight_number = "1234"
+    summary_file = tmp_path / "drops.md"
+    drops = [
+        StandaloneFareDrop(
+            config,
+            TrackedFare("USD", 12000, "1234", "10:00"),
+            TrackedFare("USD", 9900, "1234", "10:00"),
+        )
+    ]
+
+    main.write_fare_tracker_summary(summary_file, drops)
+
+    summary = summary_file.read_text()
+    assert "# Southwest Fare Drops" in summary
+    assert "PHX to DEN flight 1234" in summary
+    assert "$120.00 to $99.00" in summary
+
+
+def test_write_fare_tracker_summary_removes_empty_summary(tmp_path: Path) -> None:
+    summary_file = tmp_path / "drops.md"
+    summary_file.write_text("old summary")
+
+    main.write_fare_tracker_summary(summary_file, [])
+
+    assert not summary_file.exists()
+
+
 @pytest.mark.parametrize(
     ("arguments", "accounts_len", "reservations_len"),
     [
@@ -135,6 +220,31 @@ def test_set_up_check_in_sends_error_message_when_arguments_are_invalid(
     assert output[1] == logging.ERROR
     assert "Invalid arguments" in output[2]
     assert "--help" in output[2]
+
+
+def test_get_config_ui_port_returns_default_port() -> None:
+    assert main.get_config_ui_port([]) == main.DEFAULT_CONFIG_UI_PORT
+
+
+def test_get_config_ui_port_returns_configured_port() -> None:
+    assert main.get_config_ui_port(["--config-ui-port", "9090"]) == 9090
+
+
+@pytest.mark.parametrize("arguments", [["--config-ui-port"], ["--config-ui-port", "invalid"]])
+def test_get_config_ui_port_exits_on_invalid_port(arguments: list[str]) -> None:
+    with pytest.raises(SystemExit):
+        main.get_config_ui_port(arguments)
+
+
+def test_main_starts_config_ui(mocker: MockerFixture) -> None:
+    mocker.patch("lib.log.init_main_logging")
+    mock_run_config_ui = mocker.patch("lib.config_ui.run_config_ui")
+    mock_set_up_check_in = mocker.patch("lib.main.set_up_check_in")
+
+    main.main(["--config-ui", "--config-ui-port", "9090"], "test_version")
+
+    mock_run_config_ui.assert_called_once_with(9090)
+    mock_set_up_check_in.assert_not_called()
 
 
 def test_main_sets_up_the_script(mocker: MockerFixture) -> None:

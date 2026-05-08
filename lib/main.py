@@ -5,17 +5,23 @@ from __future__ import annotations
 import multiprocessing
 import os
 import sys
+from pathlib import Path
 
 import requests
 
 from lib import log
 
 from .config import IS_DOCKER, GlobalConfig, ReservationConfig
+from .config_ui import DEFAULT_CONFIG_UI_PORT
 from .reservation_monitor import AccountMonitor, ReservationMonitor
 from .standalone_fare_tracker import StandaloneFareMonitor
 
 IP_TIMEZONE_URL = "https://ipinfo.io/timezone"
 LOG_FILE = "logs/auto-southwest-check-in.log"
+CONFIG_UI_FLAG = "--config-ui"
+CONFIG_UI_PORT_FLAG = "--config-ui-port"
+FARE_TRACKERS_ONCE_FLAG = "--fare-trackers-once"
+FARE_TRACKERS_SUMMARY_FILE_FLAG = "--fare-trackers-summary-file"
 
 logger = log.get_logger(__name__)
 
@@ -78,6 +84,88 @@ def set_up_fare_trackers(config: GlobalConfig, lock: multiprocessing.Lock) -> No
         fare_monitor.start()
 
 
+def check_fare_trackers_once(config: GlobalConfig, summary_file_path: Path | None = None) -> None:
+    drops = []
+    for fare_tracker in config.fare_trackers:
+        config.merge_notification_config(fare_tracker)
+        fare_monitor = StandaloneFareMonitor(fare_tracker)
+        drops.extend(fare_monitor._check(send_notifications=False))
+
+    if summary_file_path is not None:
+        write_fare_tracker_summary(summary_file_path, drops)
+
+    if drops:
+        new_config = ReservationConfig()
+        new_config.notifications = config.notifications
+        reservation_monitor = ReservationMonitor(new_config)
+        reservation_monitor.notification_handler.standalone_fare_drop_summary(drops)
+
+
+def write_fare_tracker_summary(summary_file_path: Path, drops: list) -> None:
+    if not drops:
+        try:
+            summary_file_path.unlink()
+        except FileNotFoundError:
+            pass
+        return
+
+    lines = ["# Southwest Fare Drops", ""]
+    for drop in drops:
+        config = drop.config
+        flight_info = ""
+        if config.flight_number:
+            flight_info = f" flight {config.flight_number}"
+
+        previous_price = NotificationPriceFormatter.format(drop.previous_fare)
+        current_price = NotificationPriceFormatter.format(drop.current_fare)
+        lines.append(
+            f"- {config.origin_airport} to {config.destination_airport}{flight_info} on "
+            f"{config.departure_date}: {drop.current_fare.currency_code} dropped from "
+            f"{previous_price} to {current_price}"
+        )
+
+    summary_file_path.write_text("\n".join(lines) + "\n")
+
+
+class NotificationPriceFormatter:
+    @staticmethod
+    def format(fare) -> str:
+        if fare.currency_code == "USD":
+            return f"${fare.amount / 100:.2f}"
+
+        return f"{fare.amount:,} {fare.currency_code}"
+
+
+def get_config_ui_port(arguments: list[str]) -> int:
+    if CONFIG_UI_PORT_FLAG not in arguments:
+        return DEFAULT_CONFIG_UI_PORT
+
+    port_arg_idx = arguments.index(CONFIG_UI_PORT_FLAG) + 1
+    try:
+        port = int(arguments[port_arg_idx])
+    except (IndexError, ValueError):
+        logger.error("Invalid config UI port. For more information, try '--help'")
+        sys.exit(2)
+
+    if port <= 0:
+        logger.error("Invalid config UI port. For more information, try '--help'")
+        sys.exit(2)
+
+    return port
+
+
+def get_fare_trackers_summary_file(arguments: list[str]) -> Path | None:
+    if FARE_TRACKERS_SUMMARY_FILE_FLAG not in arguments:
+        return None
+
+    path_arg_idx = arguments.index(FARE_TRACKERS_SUMMARY_FILE_FLAG) + 1
+    try:
+        return Path(arguments[path_arg_idx])
+    except IndexError:
+        logger.error("Invalid fare tracker summary file. For more information, try '--help'")
+        sys.exit(2)
+
+
 def set_up_check_in(arguments: list[str]) -> None:
     """
     Initialize reservation and account monitoring based on the configuration
@@ -88,7 +176,10 @@ def set_up_check_in(arguments: list[str]) -> None:
     config = GlobalConfig()
     config.initialize()
 
-    if "--test-notifications" in arguments:
+    if FARE_TRACKERS_ONCE_FLAG in arguments:
+        check_fare_trackers_once(config, get_fare_trackers_summary_file(arguments))
+        sys.exit()
+    elif "--test-notifications" in arguments:
         test_notifications(config)
         sys.exit()
     elif len(arguments) == 2:
@@ -139,6 +230,12 @@ def main(arguments: list[str], version: str) -> None:
         # Setting timezone to avoid Southwest fingerprinting (based on browser timezone)
         timezone = get_timezone()
         os.environ["TZ"] = timezone
+
+    if CONFIG_UI_FLAG in arguments:
+        from .config_ui import run_config_ui  # noqa: PLC0415
+
+        run_config_ui(get_config_ui_port(arguments))
+        return
 
     # Remove flags now that they are not needed (and will mess up parsing)
     flags_to_remove = ["--debug-screenshots", "-v", "--verbose"]

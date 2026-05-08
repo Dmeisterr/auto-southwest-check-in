@@ -4,9 +4,8 @@ from requests_mock.mocker import Mocker as RequestMocker
 
 from lib.config import TrackedFareConfig
 from lib.standalone_fare_tracker import BOOKING_SHOPPING_URL, StandaloneFareClient
-from lib.utils import BASE_URL
 
-SHOPPING_URL = BASE_URL + BOOKING_SHOPPING_URL
+SHOPPING_URL = BOOKING_SHOPPING_URL
 
 
 def create_config(flight_number: str | None = "1234") -> TrackedFareConfig:
